@@ -1,0 +1,48 @@
+{
+    "models": {
+        "lm_studio": {
+            "name": "LM Studio",
+            "base_url": "http://localhost:1234",
+            "api_key": "lm-studio",
+            "model_name": "gpt-oss-20b",
+            "enabled": true,
+            "timeout": 30,
+            "retry_attempts": 3,
+            "retry_delay": 0.5,
+            "parameters": {
+                "temperature": 0.7,
+                "max_tokens": 1000,
+                "top_p": 1.0,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+            }
+        },
+        "deepseek": {
+            "name": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+            "api_key": "${DEEPSEEK_API_KEY}",
+            "model_name": "deepseek-chat",
+            "enabled": true,
+            "timeout": 30,
+            "retry_attempts": 3,
+            "retry_delay": 0.5,
+            "parameters": {
+                "temperature": 0.7,
+                "max_tokens": 1000,
+                "top_p": 1.0,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+            }
+        }
+    },
+    "default_model": "deepseek",
+    "fallback_models": ["lm_studio", "deepseek", "openai"],
+    "global_settings": {
+        "max_memory": 50,
+        "connection_timeout": 10,
+        "request_timeout": null,
+        "enable_streaming": true,
+        "enable_tools": true,
+        "log_level": "INFO"
+    }
+}
