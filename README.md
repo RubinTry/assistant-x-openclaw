@@ -1,4 +1,4 @@
-# 妈妈我再也不用羡慕钢铁侠了😭
+<center style="font-size:32px;font-weight:bold">妈妈我再也不用羡慕钢铁侠了😭</center>
 
 基于 sherpa-onnx 的本地语音助手，通过 OpenClaw Gateway 与 LLM 对话，以 JARVIS 风格进行语音交互。支持语音唤醒、连续对话、实时 TTS 播报和 HUD 视觉特效。
 
@@ -21,8 +21,8 @@ jarvis-x-openclaw/
 │   └── enroll_speaker.py   # 声纹录入工具
 ├── data/
 │   └── voices/             # 音效文件（.wav）
-├── models/                 # ONNX 模型文件（gitignore）
-├── sound_sample/           # 用户声纹样本（gitignore 内容，追踪目录）
+├── models/                 # ONNX 模型文件
+├── sound_sample/           # 用户声纹样本
 ├── jarvis_overlay/         # Flutter HUD 特效应用
 ├── custom_keywords.txt     # 唤醒词配置
 ├── .env                    # API 密钥等配置
@@ -118,8 +118,33 @@ pip install -r requirements.txt
 复制 `.env.example` 为 `.env`，填入以下配置：
 
 ```bash
-MINIMAX_API_KEY=your_api_key_here
+MINIMAX_API_KEY=your_api_key_here（不想用也可以换别家大模型，变量名记得改）
 OPENCLAW_GATEWAY_TOKEN=your_gateway_token
+```
+
+同时需要在 `~/.openclaw/openclaw.json` 中确保 Gateway 的 HTTP 端点已启用：
+
+```json
+"gateway": {
+  "port": 18789,
+  "mode": "local",
+  "bind": "loopback",
+  "auth": {
+    "mode": "token",
+    "token": "your token"
+  },
+  "tailscale": {
+    "mode": "off",
+    "resetOnExit": false
+  },
+  "http": {
+    "endpoints": {
+      "chatCompletions": {
+        "enabled": true
+      }
+    }
+  }
+}
 ```
 
 ### 4. 下载模型文件
