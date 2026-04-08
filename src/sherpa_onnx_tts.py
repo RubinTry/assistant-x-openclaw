@@ -18,11 +18,12 @@ import soundfile as sf
 
 logger = logging.getLogger(__name__)
 
-_OPENCLAW_DIR = os.path.expanduser("~/.openclaw")
-RUNTIME_DIR = f"{_OPENCLAW_DIR}/tools/sherpa-onnx-tts/runtime"
-ZIPVOICE_DIR = f"{_OPENCLAW_DIR}/tools/sherpa-onnx-tts/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
-VOCODER = f"{_OPENCLAW_DIR}/tools/sherpa-onnx-tts/models/vocos_24khz.onnx"
-REF_AUDIO = f"{_OPENCLAW_DIR}/tools/sherpa-onnx-tts/models/jarvis_start_up.mp3"
+_PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ZIPVOICE_DIR = os.path.join(
+    _PROJECT_DIR, "models", "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
+)
+VOCODER = os.path.join(_PROJECT_DIR, "models", "vocos_24khz.onnx")
+REF_AUDIO = os.path.join(_PROJECT_DIR, "data", "voices", "jarvis_start_up.mp3")
 REF_TEXT = "Allow me to introduce myself I am jarvis, a virtual artificial intelligence importing all preferences from home interface systems are now fully operational."
 
 _tts = None

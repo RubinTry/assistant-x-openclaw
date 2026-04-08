@@ -967,30 +967,34 @@ def get_args():
     )
 
     # Qwen3-ASR 模型参数（离线识别）
+    _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _qwen3_model_dir = os.path.join(
+        _project_dir, "models", "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25"
+    )
     parser.add_argument(
         "--qwen3-conv-frontend",
         type=str,
-        default="~/.openclaw/tools/sherpa-onnx-tts/models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/conv_frontend.onnx",
+        default=os.path.join(_qwen3_model_dir, "conv_frontend.onnx"),
     )
     parser.add_argument(
         "--qwen3-encoder",
         type=str,
-        default="~/.openclaw/tools/sherpa-onnx-tts/models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/encoder.int8.onnx",
+        default=os.path.join(_qwen3_model_dir, "encoder.int8.onnx"),
     )
     parser.add_argument(
         "--qwen3-decoder",
         type=str,
-        default="~/.openclaw/tools/sherpa-onnx-tts/models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/decoder.int8.onnx",
+        default=os.path.join(_qwen3_model_dir, "decoder.int8.onnx"),
     )
     parser.add_argument(
         "--qwen3-tokenizer",
         type=str,
-        default="~/.openclaw/tools/sherpa-onnx-tts/models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer",
+        default=os.path.join(_qwen3_model_dir, "tokenizer"),
     )
     parser.add_argument(
         "--vad-model",
         type=str,
-        default="~/.openclaw/tools/sherpa-onnx-tts/models/silero_vad.onnx",
+        default=os.path.join(_project_dir, "models", "silero_vad.onnx"),
     )
 
     parser.add_argument("--provider", type=str, default="cpu")
