@@ -71,6 +71,9 @@ class Win32Window {
   // Called when Destroy is called.
   virtual void OnDestroy();
 
+  // Enables layered transparent window with click-through support.
+  bool SetTransparent(bool transparent, bool click_through = false);
+
  private:
   friend class WindowClassRegistrar;
 

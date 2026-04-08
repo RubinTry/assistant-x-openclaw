@@ -16,24 +16,43 @@ bool FlutterWindow::OnCreate() {
 
   RECT frame = GetClientArea();
 
-  // The size here must match the window dimensions to avoid unnecessary surface
-  // creation / destruction in the startup path.
   flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
       frame.right - frame.left, frame.bottom - frame.top, project_);
-  // Ensure that basic setup of the controller was successful.
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+
+    HWND hwnd = GetHandle();
+  if (hwnd) {
+    LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE);
+    style |= WS_POPUP | WS_CLIPCHILDREN;
+    SetWindowLongPtr(hwnd, GWL_STYLE, style);
+
+    LONG_PTR ex_style = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+    ex_style |= WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT;
+    SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style);
+
+    SetLayeredWindowAttributes(hwnd, RGB(255, 0, 255), 255, LWA_COLORKEY);
+
+    HMONITOR primary = MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi = {sizeof(mi)};
+    GetMonitorInfo(primary, &mi);
+    int w = mi.rcMonitor.right - mi.rcMonitor.left;
+    int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    SetWindowPos(hwnd, HWND_TOPMOST,
+                 mi.rcMonitor.left, mi.rcMonitor.top,
+                 w, h,
+                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  }
+
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
 
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
   flutter_controller_->ForceRedraw();
 
   return true;
