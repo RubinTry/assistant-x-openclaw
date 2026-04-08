@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:jarvis_overlay/tcp_server.dart';
+import 'package:jarvis_overlay/jarvis_rings_windows.dart';
 
 class JarvisRingsPainter extends CustomPainter {
   final double outerRingRotation;
@@ -683,7 +685,8 @@ class _JarvisOverlayState extends State<JarvisOverlay>
 
   @override
   Widget build(BuildContext context) {
-    final double terminalHeight = _screenHeight / 3;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final double terminalHeight = screenHeight / 3;
     final size = 300.0;
 
     final leftSlide =
@@ -710,7 +713,7 @@ class _JarvisOverlayState extends State<JarvisOverlay>
           child: Align(
             alignment: Alignment.topLeft,
             child: Container(
-              margin: EdgeInsets.only(left: 40, top: _screenHeight * 0.25),
+              margin: EdgeInsets.only(left: 40, top: screenHeight * 0.25),
               child: SizedBox(
                 height: terminalHeight,
                 child: _buildTerminal(
@@ -729,7 +732,7 @@ class _JarvisOverlayState extends State<JarvisOverlay>
           child: Align(
             alignment: Alignment.bottomRight,
             child: Container(
-              margin: EdgeInsets.only(right: 40, bottom: _screenHeight * 0.25),
+              margin: EdgeInsets.only(right: 40, bottom: screenHeight * 0.25),
               child: SizedBox(
                 height: terminalHeight,
                 child: _buildTerminal(
@@ -760,21 +763,39 @@ class _JarvisOverlayState extends State<JarvisOverlay>
                             width: size,
                             height: size,
                             child: CustomPaint(
-                              painter: JarvisRingsPainter(
-                                outerRingRotation:
-                                    (_outerRingAngle * 2 * math.pi) %
-                                    (2 * math.pi),
-                                arcsRotation:
-                                    (_arcsAngle * 2 * math.pi) % (2 * math.pi),
-                                dataRingRotation:
-                                    (_dataRingAngle * 2 * math.pi) %
-                                    (2 * math.pi),
-                                innerRingRotation:
-                                    (_innerRingAngle * 2 * math.pi) %
-                                    (2 * math.pi),
-                                pulseValue: _pulseController.value,
-                                currentEffect: _currentEffect,
-                              ),
+                              painter: Platform.isWindows
+                                  ? JarvisRingsPainterWindows(
+                                      outerRingRotation:
+                                          (_outerRingAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      arcsRotation:
+                                          (_arcsAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      dataRingRotation:
+                                          (_dataRingAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      innerRingRotation:
+                                          (_innerRingAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      pulseValue: _pulseController.value,
+                                      currentEffect: _currentEffect,
+                                    )
+                                  : JarvisRingsPainter(
+                                      outerRingRotation:
+                                          (_outerRingAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      arcsRotation:
+                                          (_arcsAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      dataRingRotation:
+                                          (_dataRingAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      innerRingRotation:
+                                          (_innerRingAngle * 2 * math.pi) %
+                                          (2 * math.pi),
+                                      pulseValue: _pulseController.value,
+                                      currentEffect: _currentEffect,
+                                    ),
                             ),
                           );
                         },

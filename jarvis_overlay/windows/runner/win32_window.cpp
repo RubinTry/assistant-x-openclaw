@@ -286,3 +286,33 @@ void Win32Window::UpdateTheme(HWND const window) {
                           &enable_dark_mode, sizeof(enable_dark_mode));
   }
 }
+
+bool Win32Window::SetTransparent(bool transparent, bool click_through) {
+  if (!window_handle_) {
+    return false;
+  }
+
+  if (transparent) {
+    LONG_PTR ex_style = GetWindowLongPtr(window_handle_, GWL_EXSTYLE);
+    ex_style |= WS_EX_LAYERED | WS_EX_COMPOSITED;
+    if (click_through) {
+      ex_style |= WS_EX_TRANSPARENT;
+    }
+    SetWindowLongPtr(window_handle_, GWL_EXSTYLE, ex_style);
+
+    LONG_PTR style = GetWindowLongPtr(window_handle_, GWL_STYLE);
+    style |= WS_CLIPCHILDREN;
+    SetWindowLongPtr(window_handle_, GWL_STYLE, style);
+
+    SetLayeredWindowAttributes(window_handle_, 0, 255, LWA_ALPHA);
+  } else {
+    LONG_PTR ex_style = GetWindowLongPtr(window_handle_, GWL_EXSTYLE);
+    ex_style &= ~(WS_EX_LAYERED | WS_EX_COMPOSITED | WS_EX_TRANSPARENT);
+    SetWindowLongPtr(window_handle_, GWL_EXSTYLE, ex_style);
+
+    LONG_PTR style = GetWindowLongPtr(window_handle_, GWL_STYLE);
+    style &= ~WS_CLIPCHILDREN;
+    SetWindowLongPtr(window_handle_, GWL_STYLE, style);
+  }
+  return true;
+}

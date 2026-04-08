@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'jarvis_overlay.dart';
 
@@ -11,26 +12,32 @@ class JarvisApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    double screenWidth;
+    double screenHeight;
+
+    if (Platform.isWindows) {
+      screenWidth = double.infinity;
+      screenHeight = double.infinity;
+    } else {
+      final mediaQuery = MediaQuery.of(context);
+      screenHeight =
+          mediaQuery.size.height -
+          mediaQuery.padding.top -
+          mediaQuery.padding.bottom;
+      screenWidth = mediaQuery.size.width;
+    }
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       color: Colors.transparent,
-      home: Builder(
-        builder: (context) {
-          final mediaQuery = MediaQuery.of(context);
-          final screenHeight =
-              mediaQuery.size.height -
-              mediaQuery.padding.top -
-              mediaQuery.padding.bottom;
-          return Scaffold(
-            backgroundColor: Colors.transparent,
-            resizeToAvoidBottomInset: false,
-            body: SizedBox(
-              height: screenHeight,
-              width: mediaQuery.size.width,
-              child: JarvisOverlay(screenHeight: screenHeight),
-            ),
-          );
-        },
+      home: Scaffold(
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: false,
+        body: SizedBox(
+          width: screenWidth,
+          height: screenHeight,
+          child: JarvisOverlay(screenHeight: screenHeight),
+        ),
       ),
     );
   }
