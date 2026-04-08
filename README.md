@@ -153,26 +153,54 @@ OPENCLAW_GATEWAY_TOKEN=your_gateway_token
 
 ### 4. 下载模型文件
 
-本项目使用的模型分为三类，全部放在项目 `models/` 目录下：
+本项目使用的模型分为三类，全部放在项目 `models/` 目录下。每个模型下载后需解压（.tar.bz2 文件），并删除压缩包以节省空间。
 
-**KWS 唤醒词模型**（放项目 `models/` 目录）：
-- 路径：`models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/`
-- 下载：https://k2-fsa.github.io/sherpa/onnx/pretrained_models/kws.html
+**KWS 唤醒词模型：**
+```bash
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+tar xf sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+rm sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+```
 
-**ASR 语音识别模型**（放项目 `models/` 目录）：
-- 路径：`models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/`
-- 下载：https://k2-fsa.github.io/sherpa/onnx/pretrained_models/streaming-zipformer.html
+**ASR 语音识别模型：**
+```bash
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
+tar xf sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
+rm sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
+```
 
-**TTS 模型**（放项目 `models/` 目录）：
-- ZipVoice 模型：`models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/`（含 encoder/decoder/tokens.txt 等）
-- 下载：https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html
-- Vocos vocoder：`models/vocos_24khz.onnx`
-- `jarvis_start_up.mp3` — JARVIS 参考音频，放 `data/voices/`
+**TTS 模型：**
+```bash
+# ZipVoice（语音克隆引擎）
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
+tar xf sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
+rm sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
 
-**Qwen3-ASR 离线识别模型**（可选，放项目 `models/` 目录）：
-- 路径：`models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/`（含 conv_frontend/encoder/decoder/tokenizer）
-- silero_vad.onnx — 静音检测：`models/silero_vad.onnx`
-- 以上两个模型均来自 sherpa-onnx TTS 工具包：https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html
+# Vocos vocoder
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx
+
+# JARVIS 参考音频（自定义录音，需命名为 jarvis_start_up.mp3 放入 data/voices/）
+# 参考文本为：Allow me to introduce myself I am jarvis, a virtual artificial intelligence
+# importing all preferences from home interface systems are now fully operational.
+# 请自行录制一段 JARVIS 开场白音频，保存为 data/voices/jarvis_start_up.mp3
+```
+
+**VAD 静音检测模型（Qwen3-ASR 离线识别模式用）：**
+```bash
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx
+mv silero_vad_v5.onnx silero_vad.onnx
+```
+
+**Qwen3-ASR 离线识别模型（可选）：**
+```bash
+# 模型位于 sherpa-onnx-tts 工具包中
+# 下载地址：https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
+# 文件名：sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
+```
 
 ### 5. 配置唤醒词
 
