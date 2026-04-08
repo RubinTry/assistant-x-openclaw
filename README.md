@@ -1,4 +1,4 @@
-# 妈妈我再也不用羡慕钢铁侠了😭
+# JARVIS 语音助手
 
 基于 sherpa-onnx 的本地语音助手，通过 OpenClaw Gateway 与 LLM 对话，以 JARVIS 风格进行语音交互。支持语音唤醒、连续对话、实时 TTS 播报和 HUD 视觉特效。
 
@@ -16,14 +16,13 @@ jarvis-x-openclaw/
 │   ├── jarvis_feedback.py  # JARVIS 风格音效 + 终端动画 + 桌面通知
 │   └── jarvis_visual.py    # JARVIS Overlay 视觉特效通信
 ├── scripts/
-│   ├── start.sh            # 启动脚本（macOS/Linux）
-│   ├── start.bat            # 启动脚本（Windows）
-│   ├── download_models.sh  # 模型下载脚本（macOS/Linux）
-│   ├── download_models.bat # 模型下载脚本（Windows）
+│   ├── start.sh            # 启动脚本（macOS）
+│   ├── start.bat           # 启动脚本（Windows）
+│   ├── restart_voice_assistant.sh  # 重启脚本
 │   └── enroll_speaker.py   # 声纹录入工具
 ├── data/
-│   └── voices/             # 音效文件（.wav）
-├── models/                 # ONNX 模型文件
+│   └── voices/             # 音效文件（.wav）+ JARVIS 参考音频（jarvis_start_up.mp3）
+├── models/                 # ONNX 模型文件（gitignore）
 ├── sound_sample/           # 用户声纹样本
 ├── jarvis_overlay/         # Flutter HUD 特效应用
 ├── custom_keywords.txt     # 唤醒词配置
@@ -165,31 +164,55 @@ OPENCLAW_GATEWAY_TOKEN=your_gateway_token
 
 ### 4. 下载模型文件
 
-本项目使用的模型分为两类：
+本项目使用的模型分为三类，全部放在项目 `models/` 目录下。每个模型下载后需解压（.tar.bz2 文件），并删除压缩包以节省空间。
 
-**自动下载（推荐）：**
-
+**KWS 唤醒词模型：**
 ```bash
-# macOS / Linux
-./scripts/download_models.sh
-
-# Windows
-.\scripts\download_models.bat
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+tar xf sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+rm sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
 ```
 
-**手动下载：**
+**ASR 语音识别模型：**
+```bash
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
+tar xf sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
+rm sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
+```
 
-| 模型 | 路径 | 下载地址 |
-|------|------|----------|
-| KWS 唤醒词 | `models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/` | [kws.html](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/kws.html) |
-| ASR 语音识别 | `models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/` | [streaming-zipformer.html](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/streaming-zipformer.html) |
-| ZipVoice TTS | `~/.openclaw/tools/sherpa-onnx-tts/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/` | [zipvoice.html](https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html) |
-| Vocos vocoder | `models/vocos_24khz.onnx` | [tts-models](https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html) |
-| JARVIS 参考音频 | `data/voices/jarvis_start_up.mp3` | [tts-models](https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html) |
+**TTS 模型：**
+```bash
+# ZipVoice（语音克隆引擎）
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
+tar xf sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
+rm sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
 
-**Qwen3-ASR 离线识别（可选）：**
-- 模型：https://k2-fsa.github.io/sherpa/onnx/pretrained_models/qwen3.html
-- silero_vad.onnx：https://github.com/k2-fsa/sherpa-onnx/releases/download/vad-models/silero_vad.onnx
+# Vocos vocoder
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx
+
+# JARVIS 参考音频（自定义录音，需命名为 jarvis_start_up.mp3 放入 data/voices/）
+# 参考文本为：Allow me to introduce myself I am jarvis, a virtual artificial intelligence
+# importing all preferences from home interface systems are now fully operational.
+# 请自行录制一段 JARVIS 开场白音频，保存为 data/voices/jarvis_start_up.mp3
+```
+
+**VAD 静音检测模型（Qwen3-ASR 离线识别模式用）：**
+```bash
+cd models/
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx
+mv silero_vad_v5.onnx silero_vad.onnx
+```
+
+**Qwen3-ASR 离线识别模型（可选）：**
+```bash
+# 模型位于 sherpa-onnx-tts 工具包中
+# 下载地址：https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
+# 文件名：sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
+```
+=======
 
 ### 5. 配置唤醒词
 
