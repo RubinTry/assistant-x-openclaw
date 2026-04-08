@@ -152,7 +152,7 @@ OPENCLAW_GATEWAY_TOKEN=your_gateway_token
 
 ### 4. 下载模型文件
 
-本项目使用的模型分为两类：
+本项目使用的模型分为三类，全部放在项目 `models/` 目录下：
 
 **KWS 唤醒词模型**（放项目 `models/` 目录）：
 - 路径：`models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/`
@@ -162,11 +162,15 @@ OPENCLAW_GATEWAY_TOKEN=your_gateway_token
 - 路径：`models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/`
 - 下载：https://k2-fsa.github.io/sherpa/onnx/pretrained_models/streaming-zipformer.html
 
-**TTS 模型**（放 `~/.openclaw/tools/sherpa-onnx-tts/models/` 目录）：
-- ZipVoice 模型：https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html
-- Vocos vocoder
-- `jarvis_start_up.mp3` — JARVIS 参考音频
-- silero_vad.onnx — 静音检测（Qwen3-ASR 模式用）
+**TTS 模型**（放项目 `models/` 目录）：
+- ZipVoice 模型：`models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/`（含 encoder/decoder/tokens.txt 等）
+- 下载：https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html
+- Vocos vocoder：`models/vocos_24khz.onnx`
+- `jarvis_start_up.mp3` — JARVIS 参考音频，放 `data/voices/`
+
+**Qwen3-ASR 离线识别模型**（可选，放项目 `models/` 目录）：
+- 路径：`models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/`（含 conv_frontend/encoder/decoder/tokenizer）
+- silero_vad.onnx — 静音检测：`models/silero_vad.onnx`
 
 ### 5. 配置唤醒词
 
