@@ -8,9 +8,9 @@ Sherpa-onnx TTS 模块 - 本地离线语音合成
 
 import logging
 import os
-import subprocess
 import tempfile
 
+import audio
 import librosa
 import numpy as np
 import sherpa_onnx
@@ -99,6 +99,9 @@ def synthesize(text: str, output_path: str = None) -> str | None:
         gen_config.num_steps = 8
 
         audio = tts.generate(text, gen_config)
+        print(
+            f"[DEBUG] synthesize: audio.samples len={len(audio.samples) if audio else 'None'}, sample_rate={audio.sample_rate if audio else 'None'}"
+        )
 
         if len(audio.samples) == 0:
             logger.error("合成失败，返回音频为空")
@@ -108,6 +111,9 @@ def synthesize(text: str, output_path: str = None) -> str | None:
             output_path, audio.samples, samplerate=audio.sample_rate, subtype="PCM_16"
         )
         logger.info(f"合成成功: {output_path}")
+        print(
+            f"[DEBUG] synthesize: 文件已写入 {output_path}, 大小={os.path.getsize(output_path)} bytes"
+        )
         return output_path
 
     except Exception as e:
@@ -116,19 +122,17 @@ def synthesize(text: str, output_path: str = None) -> str | None:
 
 
 def play_audio(file_path: str):
+    print(f"[DEBUG] play_audio called: {file_path}, exists={os.path.exists(file_path)}")
     try:
-        subprocess.run(
-            ["afplay", "-v", "1.5", file_path],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(f"播放失败: {e}")
+        result = audio.play_audio_file(file_path, volume=1.5, blocking=True)
+        print(f"[DEBUG] play_audio result: {result}")
     except Exception as e:
         logger.error(f"播放异常: {e}")
+        print(f"[DEBUG] play_audio exception: {e}")
 
 
 def text_to_speech_play(text: str, **kwargs):
+    print(f"[DEBUG] text_to_speech_play called: {text[:30]}...")
     if not text:
         return
 

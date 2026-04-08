@@ -7,10 +7,13 @@ JARVIS 风格反馈系统
 """
 
 import os
+import platform
 import subprocess
 import threading
 import time
 from typing import Optional
+
+import audio
 
 VOICES_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "voices")
 
@@ -74,15 +77,8 @@ class JarvisFeedback:
             if current_time - last_time < 0.5:
                 return
             self._last_sound_time[sound_name] = current_time
-            subprocess.run(
-                ["afplay", "-v", "0.5", sound_file],
-                check=True,
-                capture_output=True,
-                timeout=10,
-            )
+            audio.play_audio_file(sound_file, volume=0.5)
             print(f"[JARVIS] 播放音效: {sound_name}")
-        except subprocess.TimeoutExpired:
-            print(f"[JARVIS] 音效播放超时: {sound_name}")
         except Exception as e:
             print(f"[JARVIS] 播放音效失败 {sound_name}: {type(e).__name__}: {e}")
 
@@ -90,6 +86,9 @@ class JarvisFeedback:
         if not self.notification_enabled:
             return
         try:
+            if platform.system() == "Windows":
+                print(f"[JARVIS 通知] {title}: {text}")
+                return
             script = f'display notification "{text}" with title "{title}"'
             if sound:
                 script += ' sound name "Glass"'

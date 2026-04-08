@@ -115,8 +115,7 @@ git clone <仓库地址>
 ```bash
 cd ~/.openclaw/workspace/voice-assistant/jarvis-x-openclaw
 python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+venv/bin/pip install --force-reinstall --no-cache -r requirements.txt
 ```
 
 **Windows：**
@@ -124,8 +123,7 @@ pip install -r requirements.txt
 ```cmd
 cd %USERPROFILE%\.openclaw\workspace\voice-assistant\jarvis-x-openclaw
 python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+.\venv\Scripts\pip.exe install --force-reinstall --no-cache  -r .\requirements.txt
 ```
 
 ### 3. 配置

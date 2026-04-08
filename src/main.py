@@ -14,11 +14,12 @@ import sys
 import time
 import threading
 import queue
+import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 _assistant_instance = None
-PID_FILE = "/tmp/voice_assistant.pid"
+PID_FILE = os.path.join(tempfile.gettempdir(), "voice_assistant.pid")
 API_PORT = 18790
 
 
