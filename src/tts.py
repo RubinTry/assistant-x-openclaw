@@ -12,6 +12,7 @@ import threading
 import time
 from pathlib import Path
 
+import audio
 import sherpa_onnx_tts
 
 _env_file = Path(__file__).parent.parent / ".env"
@@ -34,10 +35,7 @@ def is_tts_playing():
 def stop_tts():
     """停止当前正在播放的 TTS"""
     _tts_playing.clear()
-    try:
-        subprocess.run(["pkill", "-f", "afplay"], capture_output=True)
-    except Exception:
-        pass
+    audio.stop_audio()
 
 
 def _clean_text_for_tts(text: str) -> str:
@@ -64,15 +62,7 @@ def _play_prebuilt_voice_sync(name: str) -> bool:
 
     try:
         _tts_playing.set()
-        subprocess.run(
-            ["afplay", "-v", "1.0", file_path],
-            check=True,
-            capture_output=True,
-            timeout=10,
-        )
-        return True
-    except subprocess.TimeoutExpired:
-        logger.warning("音频播放超时")
+        audio.play_audio_file(file_path, volume=1.0, blocking=True)
         return True
     except Exception as e:
         logger.error(f"播放预生成音频失败: {e}")
@@ -93,6 +83,7 @@ def play_prebuilt_voice(name: str, fallback_text: str = None):
 
 
 def text_to_speech_play(text: str, speed: float = 1.0, **kwargs):
+    print(f"[DEBUG tts] text_to_speech_play called: {text[:30]}...")
     if not text:
         print("[TTS] 文本为空")
         return
@@ -106,6 +97,7 @@ def text_to_speech_play(text: str, speed: float = 1.0, **kwargs):
 
     def _speak():
         try:
+            print(f"[DEBUG tts] _speak called, text={cleaned_text[:20]}...")
             if not sherpa_onnx_tts.is_available():
                 print("[TTS] Sherpa-onnx TTS 不可用")
                 return
