@@ -110,10 +110,21 @@ git clone <仓库地址>
 
 在项目根目录下创建虚拟环境并安装依赖：
 
+**macOS / Linux：**
+
 ```bash
 cd ~/.openclaw/workspace/voice-assistant/jarvis-x-openclaw
 python3 -m venv venv
 source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Windows：**
+
+```cmd
+cd %USERPROFILE%\.openclaw\workspace\voice-assistant\jarvis-x-openclaw
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -201,6 +212,7 @@ mv silero_vad_v5.onnx silero_vad.onnx
 # 下载地址：https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
 # 文件名：sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
 ```
+=======
 
 ### 5. 配置唤醒词
 
