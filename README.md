@@ -1,4 +1,4 @@
-<center style="font-size:32px;font-weight:bold">妈妈我再也不用羡慕钢铁侠了😭</center>
+# 妈妈我再也不用羡慕钢铁侠了😭
 
 基于 sherpa-onnx 的本地语音助手，通过 OpenClaw Gateway 与 LLM 对话，以 JARVIS 风格进行语音交互。支持语音唤醒、连续对话、实时 TTS 播报和 HUD 视觉特效。
 
@@ -107,7 +107,10 @@ git clone <仓库地址>
 
 ### 2. 安装依赖
 
+在项目根目录下创建虚拟环境并安装依赖：
+
 ```bash
+cd ~/.openclaw/workspace/voice-assistant/jarvis-x-openclaw
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
