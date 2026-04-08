@@ -1,4 +1,4 @@
-# 妈妈我再也不用羡慕钢铁侠了😭
+# JARVIS 语音助手
 
 基于 sherpa-onnx 的本地语音助手，通过 OpenClaw Gateway 与 LLM 对话，以 JARVIS 风格进行语音交互。支持语音唤醒、连续对话、实时 TTS 播报和 HUD 视觉特效。
 
@@ -16,12 +16,13 @@ jarvis-x-openclaw/
 │   ├── jarvis_feedback.py  # JARVIS 风格音效 + 终端动画 + 桌面通知
 │   └── jarvis_visual.py    # JARVIS Overlay 视觉特效通信
 ├── scripts/
-│   ├── start.sh            # 启动脚本（启动 Overlay + 语音助手）
+│   ├── start.sh            # 启动脚本（macOS）
+│   ├── start.bat           # 启动脚本（Windows）
 │   ├── restart_voice_assistant.sh  # 重启脚本
 │   └── enroll_speaker.py   # 声纹录入工具
 ├── data/
-│   └── voices/             # 音效文件（.wav）
-├── models/                 # ONNX 模型文件
+│   └── voices/             # 音效文件（.wav）+ JARVIS 参考音频（jarvis_start_up.mp3）
+├── models/                 # ONNX 模型文件（gitignore）
 ├── sound_sample/           # 用户声纹样本
 ├── jarvis_overlay/         # Flutter HUD 特效应用
 ├── custom_keywords.txt     # 唤醒词配置
@@ -171,6 +172,7 @@ OPENCLAW_GATEWAY_TOKEN=your_gateway_token
 **Qwen3-ASR 离线识别模型**（可选，放项目 `models/` 目录）：
 - 路径：`models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/`（含 conv_frontend/encoder/decoder/tokenizer）
 - silero_vad.onnx — 静音检测：`models/silero_vad.onnx`
+- 以上两个模型均来自 sherpa-onnx TTS 工具包：https://k2-fsa.github.io/sherpa/onnx/tts/zipvoice.html
 
 ### 5. 配置唤醒词
 
