@@ -54,10 +54,18 @@ def _load_token():
 
 
 class OpenClawBridge:
-    def __init__(self, gateway_url=DEFAULT_GATEWAY_URL, timeout=DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        gateway_url=DEFAULT_GATEWAY_URL,
+        timeout=DEFAULT_TIMEOUT,
+        agent_id="main",
+        namespace="main",
+    ):
         self.gateway_url = gateway_url.rstrip("/")
         self.timeout = timeout
         self.token = _load_token()
+        self.agent_id = agent_id
+        self.namespace = namespace
         self.available_tools = []
         self._current_request_id = None
         self._lock = threading.Lock()
@@ -98,7 +106,8 @@ class OpenClawBridge:
                 headers={
                     "Authorization": f"Bearer {self.token}",
                     "Content-Type": "application/json",
-                    "x-openclaw-session-key": "agent:main:jarvis",
+                    "x-openclaw-agent-id": self.agent_id,
+                    "x-openclaw-session-key": f"agent:{self.agent_id}:{self.agent_id}",
                 },
                 json={
                     "model": "openclaw",
@@ -167,7 +176,8 @@ class OpenClawBridge:
                 headers={
                     "Authorization": f"Bearer {self.token}",
                     "Content-Type": "application/json",
-                    "x-openclaw-session-key": "agent:main:jarvis",
+                    "x-openclaw-agent-id": self.agent_id,
+                    "x-openclaw-session-key": f"agent:{self.agent_id}:{self.agent_id}",
                 },
                 json={
                     "model": "openclaw",
@@ -231,7 +241,8 @@ class OpenClawBridge:
                 headers={
                     "Authorization": f"Bearer {self.token}",
                     "Content-Type": "application/json",
-                    "x-openclaw-session-key": "agent:main:jarvis",
+                    "x-openclaw-agent-id": self.agent_id,
+                    "x-openclaw-session-key": f"agent:{self.agent_id}:{self.agent_id}",
                 },
                 json={
                     "model": "openclaw",
@@ -310,11 +321,5 @@ class OpenClawBridge:
             return None
 
 
-_bridge = None
-
-
 def get_bridge(**kwargs):
-    global _bridge
-    if _bridge is None:
-        _bridge = OpenClawBridge(**kwargs)
-    return _bridge
+    return OpenClawBridge(**kwargs)

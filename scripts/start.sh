@@ -28,9 +28,9 @@ fi
 
 # 查找 JARVIS Overlay app
 JARVIS_APP=""
-DEBUG_APP="${PROJECT_DIR}/jarvis_overlay/build/macos/Build/Products/Debug/jarvis_overlay.app"
-RELEASE_APP="${PROJECT_DIR}/jarvis_overlay/build/macos/Build/Products/Release/jarvis_overlay.app"
-SYSTEM_APP="/Applications/jarvis_overlay.app"
+DEBUG_APP="${PROJECT_DIR}/assistant_overlay/build/macos/Build/Products/Debug/assistant_overlay.app"
+RELEASE_APP="${PROJECT_DIR}/assistant_overlay/build/macos/Build/Products/Release/assistant_overlay.app"
+SYSTEM_APP="/Applications/assistant_overlay.app"
 
 if pgrep -f "jarvis_overlay.*Debug" > /dev/null 2>&1; then
     echo "Debug 版 JARVIS Overlay 已在运行，使用已启动的实例"
@@ -53,8 +53,8 @@ elif [ -d "$SYSTEM_APP" ]; then
     open "$JARVIS_APP"
     sleep 3
 else
-    echo "错误: 找不到 jarvis_overlay.app"
-    echo "请确保已构建 Flutter 项目，或已将 jarvis_overlay.app 安装到 /Applications"
+    echo "错误: 找不到 assistant_overlay.app"
+    echo "请确保已构建 Flutter 项目，或已将 assistant_overlay.app 安装到 /Applications"
     echo ""
     echo "构建命令:"
     echo "  cd ${PROJECT_DIR}/jarvis_overlay"

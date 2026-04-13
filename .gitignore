@@ -67,6 +67,17 @@ cython_debug/
 # Ruff linter cache
 .ruff_cache/
 
+# Qwen Code config
+.qwen/
+
+# Build artifacts & bundles
+*.zip
+
+# Flutter overlay generated files
+assistant_overlay/macos/Pods/
+assistant_overlay/macos/Flutter/
+assistant_overlay/windows/flutter/ephemeral/
+
 # Local data (runtime)
 sound_sample/*
 !sound_sample/.gitkeep

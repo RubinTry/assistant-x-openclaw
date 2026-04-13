@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dart *)",
+      "Bash(python3 *)"
+    ]
+  },
+  "$version": 3
+}

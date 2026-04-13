@@ -1,0 +1,104 @@
+{
+    "default": "jarvis",
+    "assistants": [
+        {
+            "id": "jarvis",
+            "name": "贾维斯",
+            "enabled": true,
+            "visual": "jarvis",
+            "keywords_file": "keywords/jarvis.txt",
+            "wake_lines": [
+                "Systems online, standing by.",
+                "At your service, sir. What do you need?",
+                "Jarvis is online. Awaiting your instructions.",
+                "Sensors calibrated. Ready for your command.",
+                "Yes sir, I'm listening.",
+                "All systems ready. At your command.",
+                "I'm here, sir. What can I do for you?"
+            ],
+            "exit_lines": [
+                "Very well, sir. Entering standby mode.",
+                "Understood. Jarvis signing off.",
+                "Copy that. Call me if you need anything.",
+                "Acknowledged. Going offline.",
+                "As you wish, sir. Systems suspended."
+            ],
+            "exit_keywords": [
+                "dismissed",
+                "stand down",
+                "that's all",
+                "nothing else",
+                "finish",
+                "that'll do",
+                "all set",
+                "you may leave",
+                "exit",
+                "quit",
+                "quiet",
+                "退下",
+                "退下吧",
+                "没事了",
+                "没有了",
+                "结束",
+                "行了",
+                "好了",
+                "你可以退下了"
+            ],
+            "instant_exit_keywords": [
+                "stand down",
+                "you may leave"
+            ],
+            "instant_exit_fuzzy": [
+                "step back",
+                "step down",
+                "back off",
+                "back out"
+            ]
+        },
+        {
+            "id": "lin-meimei",
+            "name": "林妹妹",
+            "enabled": true,
+            "visual": "jarvis",
+            "keywords_file": "keywords/lin-meimei.txt",
+            "wake_lines": [
+                "哟～这会子才想起我来，我还以为哥哥早把我给忘了呢。",
+                "哈？叫我呢？说吧，什么事儿？",
+                "妹妹在呢，哥哥请吐吞。",
+                "来啦来啦，妹妹随时待命。",
+                "嗯？叫我？说。",
+                "我在的我在的，哥哥请讲。",
+                "妹妹等半天了，快说吧。",
+                "来了来了，您说。"
+            ],
+            "exit_lines": [
+                "终究是妹妹我错付了，哥哥心里哪有我，竟舍不得多给这一丁点儿空间。",
+                "哼，不用我就说不用我吧。",
+                "好吧，妹妹先呎着了。",
+                "得令，妹妹退下了。",
+                "知道了，有事再叫我。",
+                "好的呢，随时叫我。"
+            ],
+            "exit_keywords": [
+                "退下",
+                "退下吧",
+                "没事了",
+                "没有了",
+                "结束",
+                "行了",
+                "好了",
+                "你可以退下了"
+            ],
+            "instant_exit_keywords": [
+                "退下吧",
+                "你可以退下了"
+            ],
+            "instant_exit_fuzzy": [
+                "退一下",
+                "推一下",
+                "退一退",
+                "推一推"
+            ]
+        }
+    ]
+}

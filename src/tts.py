@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-TTS 模块 - 基于 Sherpa-onnx 本地离线语音合成 (中英文支持)
+TTS 模块 - 统一语音合成入口
+
+通过 AssistantTTS 抽象接口，将 TTS 能力委托给当前 Assistant 的实现。
+调用 set_tts() 注入实例后，即可使用 text_to_speech_play() 等高层 API。
 """
 
 import logging
@@ -13,7 +16,7 @@ import time
 from pathlib import Path
 
 import audio
-import sherpa_onnx_tts
+from assistants.tts import AssistantTTS, NullAssistantTTS
 
 _env_file = Path(__file__).parent.parent / ".env"
 if _env_file.exists():
@@ -27,6 +30,16 @@ logger = logging.getLogger(__name__)
 
 _tts_playing = threading.Event()
 
+# ── AssistantTTS 实例（由 main.py 在启动时注入）─────────
+_assistant_tts: AssistantTTS = NullAssistantTTS()
+
+
+def set_tts(tts_instance: AssistantTTS):
+    """注入当前 Assistant 的 TTS 实例"""
+    global _assistant_tts
+    _assistant_tts = tts_instance
+    logger.info(f"TTS 已设置: {type(tts_instance).__name__}")
+
 
 def is_tts_playing():
     return _tts_playing.is_set()
@@ -36,6 +49,11 @@ def stop_tts():
     """停止当前正在播放的 TTS"""
     _tts_playing.clear()
     audio.stop_audio()
+    try:
+        import sounddevice as sd
+        sd.stop()
+    except Exception:
+        pass
 
 
 def _clean_text_for_tts(text: str) -> str:
@@ -98,11 +116,17 @@ def text_to_speech_play(text: str, speed: float = 1.0, **kwargs):
     def _speak():
         try:
             print(f"[DEBUG tts] _speak called, text={cleaned_text[:20]}...")
-            if not sherpa_onnx_tts.is_available():
-                print("[TTS] Sherpa-onnx TTS 不可用")
+            if not _assistant_tts.is_available():
+                print("[TTS] TTS 不可用")
                 return
 
-            sherpa_onnx_tts.text_to_speech_play(cleaned_text)
+            output_path = _assistant_tts.synthesize(cleaned_text)
+            if output_path:
+                audio.play_audio_file(output_path, volume=1.5, blocking=True)
+                try:
+                    os.unlink(output_path)
+                except Exception:
+                    pass
             print("[TTS] 播放完成")
         except Exception as e:
             print(f"[TTS] 异常: {type(e).__name__}: {e}")
@@ -113,3 +137,21 @@ def text_to_speech_play(text: str, speed: float = 1.0, **kwargs):
     t = threading.Thread(target=_speak, daemon=True)
     t.start()
     t.join()
+
+
+def text_to_speech_play_streaming(text: str, stop_event=None, **kwargs):
+    """流式合成并播放（边合成边播放）"""
+    if not text:
+        return
+
+    cleaned_text = _clean_text_for_tts(text)
+    if not cleaned_text:
+        return
+
+    _tts_playing.set()
+    try:
+        _assistant_tts.synthesize_streaming(cleaned_text, stop_event=stop_event)
+    except Exception as e:
+        print(f"[TTS] 流式播放异常: {type(e).__name__}: {e}")
+    finally:
+        _tts_playing.clear()
