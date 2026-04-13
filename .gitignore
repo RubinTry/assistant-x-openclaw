@@ -84,3 +84,6 @@ sound_sample/*
 models/
 *.DS_Store
 
+# Auto-generated keywords file (merged at startup)
+keywords/global.txt
+

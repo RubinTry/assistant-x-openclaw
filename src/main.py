@@ -139,52 +139,9 @@ def _load_assistant_config(assistant_id: str = None) -> dict:
     raise ValueError(f"assistants.json 中未找到 assistant: {target_id}")
 
 
-def _merge_keywords_files(assistants: list, output_path: str) -> dict:
-    """合并所有 assistant 的 keywords 文件
-
-    Returns:
-        keyword_to_assistant_id 映射字典
-    """
-    keyword_mapping = {}  # keyword_text -> assistant_id
-    merged_lines = []
-
-    for assistant in assistants:
-        assistant_id = assistant["id"]
-        keywords_file = assistant.get("keywords_file")
-
-        if not keywords_file:
-            continue
-
-        full_path = os.path.join(_PROJECT_DIR, keywords_file)
-        if not os.path.exists(full_path):
-            print(f"[警告] Keywords 文件不存在: {full_path}")
-            continue
-
-        print(
-            f"[配置] 加载 {assistant['name']} ({assistant_id}) 的唤醒词: {keywords_file}"
-        )
-
-        with open(full_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-
-                # 解析 keyword 行格式: phonemes:score #threshold @keyword_text
-                if "@" in line:
-                    keyword_text = line.split("@")[-1].strip()
-                    keyword_mapping[keyword_text] = assistant_id
-
-                merged_lines.append(line)
-
-    # 写入合并后的文件
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(merged_lines))
-
-    print(f"[配置] 已合并 {len(merged_lines)} 条唤醒词到: {output_path}")
-    print(f"[配置] 唤醒词映射: {keyword_mapping}")
-
-    return keyword_mapping
+# _merge_keywords_files 函数已废弃
+# 唤醒词合并逻辑已移至 start.sh 脚本中
+# 程序直接使用 global.txt 文件
 
 
 # ── 运行时变量（由 _apply_assistant_config 填充） ────────────
@@ -290,9 +247,45 @@ class VoiceAssistant:
         self._suppress_recognition_until_tts_done = False
 
         self.keyword_spotter = self._create_keyword_spotter()
+        # 始终创建流式识别器（用于连续对话模式）
         self.recognizer = self._create_recognizer()
-        self._use_offline_asr = False
-        print("[配置] 使用流式识别模式（热词增强）")
+        
+        # 根据 assistant 配置决定使用哪种识别模式
+        asr_mode = self.current_cfg.get("asr_mode", "streaming")
+        if asr_mode == "sense_voice_en":
+            # 使用 SenseVoice 英文模式
+            sense_result = self._create_sense_voice_recognizer(language="en")
+            if sense_result and sense_result[0] is not None:
+                self.offline_recognizer, self.vad_config = sense_result
+                self._use_offline_asr = True
+                print("[配置] 贾维斯使用 SenseVoice 英文识别模式 (English only)")
+            else:
+                self._use_offline_asr = False
+                print("[配置] SenseVoice 不可用，使用流式识别模式（热词增强）")
+        elif asr_mode == "sense_voice":
+            # 使用 SenseVoice 自动语言检测
+            sense_result = self._create_sense_voice_recognizer(language="auto")
+            if sense_result and sense_result[0] is not None:
+                self.offline_recognizer, self.vad_config = sense_result
+                self._use_offline_asr = True
+                print("[配置] 使用 SenseVoice 多语言识别模式")
+            else:
+                self._use_offline_asr = False
+                print("[配置] SenseVoice 不可用，使用流式识别模式（热词增强）")
+        elif asr_mode == "offline":
+            # 尝试创建 Qwen3-ASR 离线识别器
+            offline_result = self._create_offline_recognizer()
+            if offline_result and offline_result[0] is not None:
+                self.offline_recognizer, self.vad_config, _ = offline_result
+                self._use_offline_asr = True
+                print("[配置] 使用 Qwen3-ASR 离线识别模式")
+            else:
+                self._use_offline_asr = False
+                print("[配置] Qwen3-ASR 不可用，使用流式识别模式（热词增强）")
+        else:
+            self._use_offline_asr = False
+            print("[配置] 使用流式识别模式（热词增强）")
+        
         self._check_microphone()
 
         # OpenClaw bridge 会在切换 assistant 时动态创建
@@ -320,6 +313,51 @@ class VoiceAssistant:
 
         self.current_cfg = self.all_assistants[assistant_id]
         _apply_assistant_config(self.current_cfg)
+
+        # 根据 assistant 配置决定使用哪种识别模式
+        asr_mode = self.current_cfg.get("asr_mode", "streaming")
+        if asr_mode == "sense_voice_en":
+            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+                self._use_offline_asr = True
+                print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式")
+            else:
+                sense_result = self._create_sense_voice_recognizer(language="en")
+                if sense_result and sense_result[0] is not None:
+                    self.offline_recognizer, self.vad_config = sense_result
+                    self._use_offline_asr = True
+                    print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式 (English only)")
+                else:
+                    self._use_offline_asr = False
+                    print(f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别")
+        elif asr_mode == "sense_voice":
+            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+                self._use_offline_asr = True
+                print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式")
+            else:
+                sense_result = self._create_sense_voice_recognizer(language="auto")
+                if sense_result and sense_result[0] is not None:
+                    self.offline_recognizer, self.vad_config = sense_result
+                    self._use_offline_asr = True
+                    print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式")
+                else:
+                    self._use_offline_asr = False
+                    print(f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别")
+        elif asr_mode == "offline":
+            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+                self._use_offline_asr = True
+                print(f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式")
+            else:
+                offline_result = self._create_offline_recognizer()
+                if offline_result and offline_result[0] is not None:
+                    self.offline_recognizer, self.vad_config, _ = offline_result
+                    self._use_offline_asr = True
+                    print(f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式")
+                else:
+                    self._use_offline_asr = False
+                    print(f"[配置] {self.current_cfg['name']} Qwen3-ASR 不可用，使用流式识别")
+        else:
+            self._use_offline_asr = False
+            print(f"[配置] {self.current_cfg['name']} 使用流式识别模式")
 
         # 更新当前使用的组件
         self.jarvis = instance.feedback
@@ -420,6 +458,67 @@ class VoiceAssistant:
             bpe_vocab=self.args.asr_tokens,
             provider=self.args.provider,
         )
+
+    def _create_sense_voice_recognizer(self, language="auto"):
+        """创建 SenseVoice 离线识别器和 VAD 配置
+        
+        Args:
+            language: 语言参数，auto/zh/en/ko/ja/yue
+        """
+        sense_voice_model = os.path.expanduser(self.args.sense_voice_model)
+        sense_voice_tokens = os.path.expanduser(self.args.sense_voice_tokens)
+        vad_model = os.path.expanduser(self.args.vad_model)
+
+        if not os.path.exists(sense_voice_model):
+            print(f"[警告] SenseVoice 模型不存在: {sense_voice_model}")
+            return None, None
+
+        print(f"[SenseVoice] 初始化离线识别器 (language={language})...")
+        print(f"  model: {sense_voice_model}")
+        print(f"  tokens: {sense_voice_tokens}")
+        print(f"  use_itn: {self.args.sense_voice_use_itn}")
+
+        try:
+            recognizer = (
+                sherpa_onnx.offline_recognizer.OfflineRecognizer.from_sense_voice(
+                    model=sense_voice_model,
+                    tokens=sense_voice_tokens,
+                    num_threads=2,
+                    use_itn=bool(self.args.sense_voice_use_itn),
+                    language=language,
+                )
+            )
+            print("[SenseVoice] 离线识别器创建成功")
+        except Exception as e:
+            print(f"[SenseVoice] 创建离线识别器失败: {e}")
+            return None, None
+
+        if not os.path.exists(vad_model):
+            print(f"[警告] VAD 模型不存在: {vad_model}")
+            print("[警告] 无法使用 SenseVoice")
+            return recognizer, None
+
+        print(f"[VAD] 初始化 VAD...")
+        try:
+            vad_config = sherpa_onnx.VadModelConfig(
+                silero_vad=sherpa_onnx.SileroVadModelConfig(
+                    model=vad_model,
+                    threshold=0.1,
+                    min_silence_duration=0.3,
+                    min_speech_duration=0.1,
+                    max_speech_duration=30,
+                    window_size=512,
+                ),
+                sample_rate=16000,
+                num_threads=1,
+                provider=self.args.provider,
+            )
+            print("[VAD] VAD 配置创建成功")
+        except Exception as e:
+            print(f"[VAD] 创建 VAD 配置失败: {e}")
+            return recognizer, None
+
+        return recognizer, vad_config
 
     def _create_offline_recognizer(self):
         """创建 Qwen3-ASR 离线识别器和 VAD 配置"""
@@ -1069,7 +1168,7 @@ class VoiceAssistant:
                 break
             except queue.Empty:
                 if self._stop_openclaw_request.is_set():
-                    self.openclaw.send_stop_command()
+                    # 只在第一次检测到打断时发送 stop 命令
                     self.openclaw.cancel_current_request()
                     print("\n[打断] OpenClaw 请求已中断")
                     self._is_openclaw_busy = False
@@ -1210,8 +1309,35 @@ def get_args():
         default="models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/joiner-epoch-99-avg-1.onnx",
     )
 
-    # Qwen3-ASR 模型参数（离线识别）
+    # SenseVoice 模型参数（离线识别）
     _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _sense_voice_model_dir = os.path.join(
+        _project_dir, "models", "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+    )
+    parser.add_argument(
+        "--sense-voice-model",
+        type=str,
+        default=os.path.join(_sense_voice_model_dir, "model.int8.onnx"),
+    )
+    parser.add_argument(
+        "--sense-voice-tokens",
+        type=str,
+        default=os.path.join(_sense_voice_model_dir, "tokens.txt"),
+    )
+    parser.add_argument(
+        "--sense-voice-use-itn",
+        type=int,
+        default=1,
+        help="是否启用反向文本规范化（标点符号）",
+    )
+    parser.add_argument(
+        "--sense-voice-language",
+        type=str,
+        default="auto",
+        help="语言：auto, zh, en, ko, ja, yue",
+    )
+    
+    # Qwen3-ASR 模型参数（离线识别）
     _qwen3_model_dir = os.path.join(
         _project_dir, "models", "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25"
     )
@@ -1260,13 +1386,29 @@ def main():
     default_cfg, all_assistants = _load_all_assistant_configs()
     print(f"[配置] 激活 assistant: {default_cfg['name']} ({default_cfg['id']})")
 
-    # 用配置中的 keywords_file 覆盖命令行默认值（除非用户显式指定了）
-    cfg_keywords = default_cfg.get("keywords_file")
-    if cfg_keywords:
-        args.keywords_file = os.path.join(_PROJECT_DIR, cfg_keywords)
-
-    # 合并所有 assistant 的唤醒词文件
-    keyword_mapping = _merge_keywords_files(all_assistants, args.keywords_file)
+    # 使用 global.txt 作为唤醒词文件（由 start.sh 脚本合并生成）
+    args.keywords_file = os.path.join(_PROJECT_DIR, "keywords", "global.txt")
+    
+    # 构建 keyword_to_assistant_id 映射（从所有 assistant 配置中读取）
+    keyword_mapping = {}
+    for assistant in all_assistants:
+        assistant_id = assistant["id"]
+        keywords_file = assistant.get("keywords_file")
+        if keywords_file:
+            full_path = os.path.join(_PROJECT_DIR, keywords_file)
+            if os.path.exists(full_path):
+                with open(full_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if "@" in line:
+                            keyword_text = line.split("@")[-1].strip()
+                            keyword_mapping[keyword_text] = assistant_id
+                print(f"[配置] 加载 {assistant['name']} ({assistant_id}) 的唤醒词映射")
+    
+    print(f"[配置] 使用唤醒词文件: {args.keywords_file}")
+    print(f"[配置] 唤醒词映射: {keyword_mapping}")
 
     for f in [
         args.kws_tokens,

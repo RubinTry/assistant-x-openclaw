@@ -10,6 +10,43 @@ if [ ! -f "$VENV_PYTHON" ]; then
     exit 1
 fi
 
+# 合并所有唤醒词文件到 global.txt
+KEYWORDS_DIR="${PROJECT_DIR}/keywords"
+GLOBAL_FILE="${KEYWORDS_DIR}/global.txt"
+
+echo "合并唤醒词文件到 global.txt..."
+# 删除旧的 global.txt
+if [ -f "$GLOBAL_FILE" ]; then
+    rm "$GLOBAL_FILE"
+    echo "  已删除旧的 global.txt"
+fi
+
+# 创建新的 global.txt，合并所有 .txt 文件的唤醒词
+touch "$GLOBAL_FILE"
+for txt_file in "${KEYWORDS_DIR}"/*.txt; do
+    # 跳过 global.txt 自身
+    if [ "$(basename "$txt_file")" = "global.txt" ]; then
+        continue
+    fi
+    
+    if [ -f "$txt_file" ]; then
+        echo "  合并: $(basename "$txt_file")"
+        cat "$txt_file" >> "$GLOBAL_FILE"
+        # 添加换行符（如果文件末尾没有）
+        echo "" >> "$GLOBAL_FILE"
+    fi
+done
+
+# 移除末尾多余的空行
+if [ -f "$GLOBAL_FILE" ]; then
+    # 使用 sed 移除末尾空行
+    sed -i '' -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$GLOBAL_FILE" 2>/dev/null || true
+fi
+
+LINE_COUNT=$(wc -l < "$GLOBAL_FILE" 2>/dev/null || echo "0")
+echo "✓ 已合并所有唤醒词到 global.txt (共 ${LINE_COUNT} 行)"
+echo ""
+
 # 检查是否有已运行的 jarvis_overlay
 if pgrep -f "jarvis_overlay.*Debug" > /dev/null 2>&1; then
     echo "Debug 版 JARVIS Overlay 已在运行，跳过端口清理"

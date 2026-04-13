@@ -7,6 +7,7 @@
             "enabled": true,
             "visual": "jarvis",
             "keywords_file": "keywords/jarvis.txt",
+            "asr_mode": "sense_voice_en",
             "wake_lines": [
                 "Systems online, standing by.",
                 "At your service, sir. What do you need?",

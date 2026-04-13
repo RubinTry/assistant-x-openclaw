@@ -113,12 +113,16 @@ class OpenClawBridge:
                     "model": "openclaw",
                     "messages": [{"role": "user", "content": "/stop"}],
                 },
-                timeout=15,
+                timeout=5,  # 降低超时时间，stop 命令应该快速响应
             )
             if resp.status_code == 200:
                 logger.info("已发送 /stop 命令")
             else:
                 logger.warning(f"发送 /stop 失败: HTTP {resp.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning("发送 /stop 命令超时 (5s)，Gateway 可能正在处理中")
+        except requests.exceptions.ConnectionError:
+            logger.warning("无法连接到 Gateway，连接被拒绝或网关未启动")
         except Exception as e:
             logger.error(f"发送 /stop 异常: {e}")
 
