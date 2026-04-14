@@ -3,7 +3,11 @@
     "allow": [
       "Bash(dart *)",
       "Bash(python3 *)",
-      "Bash(bash *)"
+      "Bash(bash *)",
+      "Bash(python *)",
+      "Bash(rm *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   },
   "$version": 3

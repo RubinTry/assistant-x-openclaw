@@ -245,6 +245,8 @@ class VoiceAssistant:
         self._stop_openclaw_request = threading.Event()
         self._ignore_next_result = False
         self._suppress_recognition_until_tts_done = False
+        self._last_interrupt_time = 0  # 记录上次打断时间，用于防止误触发
+        self._last_wake_time = 0  # 记录上次唤醒时间，唤醒后保护期内跳过退出检测
 
         self.keyword_spotter = self._create_keyword_spotter()
         # 始终创建流式识别器（用于连续对话模式）
@@ -588,7 +590,7 @@ class VoiceAssistant:
 
         _recog = recognition_result.strip()
         _is_exit = _recog in EXIT_KEYWORDS or any(
-            kw in _recog for kw in ("退一下", "推一下", "退一退", "推一推")
+            kw in _recog for kw in INSTANT_EXIT_FUZZY
         )
         if _is_exit:
             print(f"收到退出指令: {recognition_result.strip()}")
@@ -708,7 +710,7 @@ class VoiceAssistant:
             return False
 
         def _do_recognize(audio_samples):
-            """使用 Qwen3-ASR 识别音频片段"""
+            """使用 SenseVoice 离线识别器识别音频片段"""
             if not self._use_offline_asr or not self.offline_recognizer:
                 return None
 
@@ -722,7 +724,7 @@ class VoiceAssistant:
                 self.offline_recognizer.decode_stream(stream)
                 return stream.result.text
             except Exception as e:
-                print(f"[Qwen3-ASR] 识别失败: {e}")
+                print(f"[离线识别] 识别失败: {e}")
                 return None
 
         start_audio_stream()
@@ -749,6 +751,10 @@ class VoiceAssistant:
                         self.keyword_spotter.decode_stream(keyword_stream)
                         kw_result = self.keyword_spotter.get_result(keyword_stream)
                         if kw_result:
+                            # 只有当前assistant的唤醒词才能打断
+                            detected_id = self._detect_assistant_from_keyword(kw_result)
+                            if detected_id != self.current_cfg["id"]:
+                                continue
                             print(f"\n[打断] 检测到唤醒词: {kw_result}")
                             stop_tts()
                             self._interrupt_openclaw()
@@ -858,6 +864,7 @@ class VoiceAssistant:
 
                             self._suppress_recognition_until_tts_done = False
                             self._ignore_next_result = False
+                            self._last_wake_time = time.time()  # 记录唤醒时间，唤醒后保护期内跳过退出检测
 
                             for _ in range(20):
                                 self._clear_queue()
@@ -895,8 +902,36 @@ class VoiceAssistant:
                             continue
 
                 else:
+                    # 已进入唤醒状态，需要持续检测唤醒词以支持打断
                     if self._is_openclaw_busy:
+                        # OpenClaw 正在处理，检测唤醒词来打断
+                        keyword_stream.accept_waveform(self.sample_rate, samples)
+                        
+                        while self.keyword_spotter.is_ready(keyword_stream):
+                            self.keyword_spotter.decode_stream(keyword_stream)
+                            kw_result = self.keyword_spotter.get_result(keyword_stream)
+                            if kw_result:
+                                # 只有当前assistant的唤醒词才能打断
+                                detected_id = self._detect_assistant_from_keyword(kw_result)
+                                if detected_id != self.current_cfg["id"]:
+                                    continue
+                                print(f"\n[打断] 检测到唤醒词: {kw_result}")
+                                # 打断当前请求
+                                self._interrupt_openclaw()
+                                self._ignore_next_result = True
+                                
+                                time.sleep(0.1)
+                                self._clear_queue()
+                                self.keyword_spotter.reset_stream(keyword_stream)
+                                keyword_stream = self.keyword_spotter.create_stream()
+                                recognition_stream = self.recognizer.create_stream()
+                                recognition_result = ""
+                                print("\n请说出指令...")
+                                break
+                        # 打断后继续循环，不再处理识别
                         continue
+                    
+                    # OpenClaw 空闲，正常处理语音识别
                     if recognition_stream is None:
                         recognition_stream = self.recognizer.create_stream()
                     recognition_stream.accept_waveform(self.sample_rate, samples)
@@ -915,11 +950,14 @@ class VoiceAssistant:
                     _early_recog = (
                         recognition_result.strip() if recognition_result else ""
                     )
-                    _early_exit = _early_recog and (
+                    # 打断后 2 秒内、唤醒后 2 秒内跳过退出检测，避免残留音频误触发
+                    _recent_interrupt = (time.time() - self._last_interrupt_time) < 2.0
+                    _recent_wake = (time.time() - self._last_wake_time) < 2.0
+                    _early_exit = _early_recog and not _recent_interrupt and not _recent_wake and (
                         _early_recog in EXIT_KEYWORDS
                         or any(
                             kw in _early_recog
-                            for kw in ("退一下", "推一下", "退一退", "推一推")
+                            for kw in INSTANT_EXIT_FUZZY
                         )
                     )
                     if _early_exit:
@@ -969,15 +1007,13 @@ class VoiceAssistant:
                             self._clear_queue()
 
                             _recog = recognition_result.strip()
-                            _is_exit = _recog in EXIT_KEYWORDS or any(
+                            # 打断后 2 秒内、唤醒后 2 秒内跳过退出检测，避免残留音频误触发
+                            _recent_interrupt = (time.time() - self._last_interrupt_time) < 2.0
+                            _recent_wake = (time.time() - self._last_wake_time) < 2.0
+                            _is_exit = not _recent_interrupt and not _recent_wake and (_recog in EXIT_KEYWORDS or any(
                                 kw in _recog
-                                for kw in (
-                                    "退一下",
-                                    "推一下",
-                                    "退一退",
-                                    "推一推",
-                                )
-                            )
+                                for kw in INSTANT_EXIT_FUZZY
+                            ))
                             if _is_exit:
                                 print(f"收到退出指令: {recognition_result.strip()}")
                                 self._interrupt_openclaw()
@@ -1079,14 +1115,34 @@ class VoiceAssistant:
     def _interrupt_openclaw(self):
         """执行打断操作：发送 /stop、取消当前请求、停止 TTS"""
         print("\n[打断] 检测到唤醒词，执行打断...")
+        # 发送 /stop 命令（异步）
         self.openclaw.send_stop_command()
+        # 取消当前请求（同步标记）
+        self.openclaw.cancel_current_request()
+        # 设置停止标志，用于阻塞等待循环
+        self._stop_openclaw_request.set()
+        # 立即重置状态，确保可以重新唤醒
+        self._is_openclaw_busy = False
+        if hasattr(self, "_waiting_active"):
+            self._waiting_active.clear()
+        # 停止 TTS 播放
+        stop_tts()
+        # 记录打断时间，用于防止后续误触发退出检测
+        self._last_interrupt_time = time.time()
+        print("[打断] 已发出中断信号，状态已重置")
+    
+    def _interrupt_openclaw_silent(self):
+        """静默中断：仅取消请求和重置状态，不发送 /stop 命令
+        用于 exit_standby 等已经明确要退出的场景，避免重复发送 /stop
+        """
         self.openclaw.cancel_current_request()
         self._stop_openclaw_request.set()
         self._is_openclaw_busy = False
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         stop_tts()
-        print("[打断] 已发出中断信号")
+        # 同样记录打断时间，防止误触发退出检测
+        self._last_interrupt_time = time.time()
 
     def _on_recognized(self, text: str):
         """识别结果 → 发送给 OpenClaw → 整体合成播报回复"""
@@ -1158,6 +1214,10 @@ class VoiceAssistant:
             except Exception as e:
                 self._waiting_active.clear()
                 result_queue.put(("error", str(e)))
+            finally:
+                # 确保无论发生什么都会重置状态
+                self._is_openclaw_busy = False
+                self._openclaw_request_active.clear()
 
         request_thread = threading.Thread(target=_openclaw_request, daemon=True)
         request_thread.start()
@@ -1169,6 +1229,7 @@ class VoiceAssistant:
             except queue.Empty:
                 if self._stop_openclaw_request.is_set():
                     # 只在第一次检测到打断时发送 stop 命令
+                    self.openclaw.send_stop_command()
                     self.openclaw.cancel_current_request()
                     print("\n[打断] OpenClaw 请求已中断")
                     self._is_openclaw_busy = False
@@ -1230,7 +1291,8 @@ class VoiceAssistant:
             print("[exit_standby] 已在待机状态，跳过")
             return
         print("\n[收到退下信号]")
-        self._interrupt_openclaw()
+        # 使用静默中断，避免重复发送 /stop 命令
+        self._interrupt_openclaw_silent()
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         self.jarvis.on_exit()

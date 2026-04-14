@@ -67,6 +67,9 @@ cython_debug/
 # Ruff linter cache
 .ruff_cache/
 
+# IDE config files
+.idea/
+
 # Qwen Code config
 .qwen/
 
