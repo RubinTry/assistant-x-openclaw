@@ -23,9 +23,12 @@ jarvis-x-openclaw/
 ├── data/
 │   └── voices/             # 音效文件（.wav）+ JARVIS 参考音频（jarvis_start_up.mp3）
 ├── models/                 # ONNX 模型文件（gitignore）
+├── keywords/               # 唤醒词配置（每个助手独立文件）
+│   ├── jarvis.txt          # 贾维斯唤醒词
+│   ├── lin-meimei.txt      # 林妹妹唤醒词
+│   └── global.txt          # 运行时自动生成（合并所有唤醒词）
 ├── sound_sample/           # 用户声纹样本
 ├── jarvis_overlay/         # Flutter HUD 特效应用
-├── custom_keywords.txt     # 唤醒词配置
 ├── .env                    # API 密钥等配置
 ├── requirements.txt        # Python 依赖
 └── venv/                   # Python 虚拟环境
@@ -63,7 +66,7 @@ jarvis-x-openclaw/
 ## 核心模块
 
 ### main.py — 主程序
-- **唤醒词检测**：使用 sherpa-onnx 关键词检测器（KWS），唤醒词在 `custom_keywords.txt` 配置
+- **唤醒词检测**：使用 sherpa-onnx 关键词检测器（KWS），唤醒词在 `keywords/global.txt` 配置（由 start.sh 自动合并生成）
 - **语音识别**：默认流式识别，可选 Qwen3-ASR 离线识别模式（VAD 静音检测）
 - **连续对话**：唤醒后进入连续对话模式，支持多轮语音指令，朗读"退出连续对话模式"或超时 30 秒自动退出
 - **打断机制**：唤醒词随时可打断当前处理流程
@@ -214,11 +217,20 @@ mv silero_vad_v5.onnx silero_vad.onnx
 
 ### 5. 配置唤醒词
 
-编辑 `custom_keywords.txt`，格式：
+唤醒词文件位于 `keywords/` 目录下，每个助手有独立的唤醒词文件（如 `jarvis.txt`、`lin-meimei.txt`）。
+
+**工作流程**：
+- 运行 `./scripts/start.sh` 时，脚本会自动将 `keywords/` 目录下所有 `.txt` 文件合并到 `global.txt`
+- 程序启动时直接读取 `keywords/global.txt` 作为唤醒词文件
+- 新增唤醒词时，只需在对应的助手文件中添加即可
+
+**格式示例**（`keywords/jarvis.txt`）：
 ```
 j iǎ w éi s ī :3.0 #0.02 @贾维斯
+j iǎ w éi s :2.0 #0.05 @贾维思
 ```
-每行：`拼音 @唤醒词`，冒号后为灵敏度，`#` 后为阈值。
+
+每行格式：`拼音 :灵敏度 #阈值 @唤醒词文本`
 
 ### 6. 启动
 
@@ -257,7 +269,7 @@ python src/main.py [options]
 
 # 核心参数
 --kws-tokens, --kws-encoder, --kws-decoder, --kws-joiner   # 唤醒词模型路径
---keywords-file           # 唤醒词配置文件（默认 custom_keywords.txt）
+--keywords-file           # 唤醒词配置文件（默认 keywords/global.txt，由 start.sh 自动生成）
 --keywords-score          # 唤醒词得分阈值（默认 0.15）
 --asr-tokens, --asr-encoder, --asr-decoder, --asr-joiner   # ASR 模型路径
 --provider                # 推理后端：cpu / coreml（默认 cpu）

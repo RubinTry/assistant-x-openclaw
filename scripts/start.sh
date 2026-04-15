@@ -10,6 +10,43 @@ if [ ! -f "$VENV_PYTHON" ]; then
     exit 1
 fi
 
+# 合并所有唤醒词文件到 global.txt
+KEYWORDS_DIR="${PROJECT_DIR}/keywords"
+GLOBAL_FILE="${KEYWORDS_DIR}/global.txt"
+
+echo "合并唤醒词文件到 global.txt..."
+# 删除旧的 global.txt
+if [ -f "$GLOBAL_FILE" ]; then
+    rm "$GLOBAL_FILE"
+    echo "  已删除旧的 global.txt"
+fi
+
+# 创建新的 global.txt，合并所有 .txt 文件的唤醒词
+touch "$GLOBAL_FILE"
+for txt_file in "${KEYWORDS_DIR}"/*.txt; do
+    # 跳过 global.txt 自身
+    if [ "$(basename "$txt_file")" = "global.txt" ]; then
+        continue
+    fi
+    
+    if [ -f "$txt_file" ]; then
+        echo "  合并: $(basename "$txt_file")"
+        cat "$txt_file" >> "$GLOBAL_FILE"
+        # 添加换行符（如果文件末尾没有）
+        echo "" >> "$GLOBAL_FILE"
+    fi
+done
+
+# 移除末尾多余的空行
+if [ -f "$GLOBAL_FILE" ]; then
+    # 使用 sed 移除末尾空行
+    sed -i '' -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$GLOBAL_FILE" 2>/dev/null || true
+fi
+
+LINE_COUNT=$(wc -l < "$GLOBAL_FILE" 2>/dev/null || echo "0")
+echo "✓ 已合并所有唤醒词到 global.txt (共 ${LINE_COUNT} 行)"
+echo ""
+
 # 检查是否有已运行的 jarvis_overlay
 if pgrep -f "jarvis_overlay.*Debug" > /dev/null 2>&1; then
     echo "Debug 版 JARVIS Overlay 已在运行，跳过端口清理"
@@ -28,9 +65,9 @@ fi
 
 # 查找 JARVIS Overlay app
 JARVIS_APP=""
-DEBUG_APP="${PROJECT_DIR}/jarvis_overlay/build/macos/Build/Products/Debug/jarvis_overlay.app"
-RELEASE_APP="${PROJECT_DIR}/jarvis_overlay/build/macos/Build/Products/Release/jarvis_overlay.app"
-SYSTEM_APP="/Applications/jarvis_overlay.app"
+DEBUG_APP="${PROJECT_DIR}/assistant_overlay/build/macos/Build/Products/Debug/assistant_overlay.app"
+RELEASE_APP="${PROJECT_DIR}/assistant_overlay/build/macos/Build/Products/Release/assistant_overlay.app"
+SYSTEM_APP="/Applications/assistant_overlay.app"
 
 if pgrep -f "jarvis_overlay.*Debug" > /dev/null 2>&1; then
     echo "Debug 版 JARVIS Overlay 已在运行，使用已启动的实例"
@@ -53,8 +90,8 @@ elif [ -d "$SYSTEM_APP" ]; then
     open "$JARVIS_APP"
     sleep 3
 else
-    echo "错误: 找不到 jarvis_overlay.app"
-    echo "请确保已构建 Flutter 项目，或已将 jarvis_overlay.app 安装到 /Applications"
+    echo "错误: 找不到 assistant_overlay.app"
+    echo "请确保已构建 Flutter 项目，或已将 assistant_overlay.app 安装到 /Applications"
     echo ""
     echo "构建命令:"
     echo "  cd ${PROJECT_DIR}/jarvis_overlay"

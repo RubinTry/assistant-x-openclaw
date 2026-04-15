@@ -54,10 +54,18 @@ def _load_token():
 
 
 class OpenClawBridge:
-    def __init__(self, gateway_url=DEFAULT_GATEWAY_URL, timeout=DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        gateway_url=DEFAULT_GATEWAY_URL,
+        timeout=DEFAULT_TIMEOUT,
+        agent_id="main",
+        namespace="main",
+    ):
         self.gateway_url = gateway_url.rstrip("/")
         self.timeout = timeout
         self.token = _load_token()
+        self.agent_id = agent_id
+        self.namespace = namespace
         self.available_tools = []
         self._current_request_id = None
         self._lock = threading.Lock()
@@ -87,6 +95,11 @@ class OpenClawBridge:
         if not self.token:
             logger.error("Gateway token 不可用")
             return False
+        # 防止重复发送：如果已经有线程在发送，跳过
+        if hasattr(self, '_stop_sending') and self._stop_sending:
+            logger.info("/stop 已在发送中，跳过")
+            return True
+        self._stop_sending = True
         threading.Thread(target=self._send_stop_sync, daemon=True).start()
         return True
 
@@ -98,20 +111,29 @@ class OpenClawBridge:
                 headers={
                     "Authorization": f"Bearer {self.token}",
                     "Content-Type": "application/json",
-                    "x-openclaw-session-key": "agent:main:jarvis",
+                    "x-openclaw-agent-id": self.agent_id,
+                    "x-openclaw-session-key": f"agent:{self.agent_id}:{self.agent_id}",
                 },
                 json={
                     "model": "openclaw",
                     "messages": [{"role": "user", "content": "/stop"}],
                 },
-                timeout=15,
+                timeout=8,  # 增加到8秒，给 Gateway 更多处理时间
             )
             if resp.status_code == 200:
                 logger.info("已发送 /stop 命令")
             else:
                 logger.warning(f"发送 /stop 失败: HTTP {resp.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning("发送 /stop 命令超时 (8s)，Gateway 可能正在处理中，但会继续执行本地中断")
+            # 超时不意味着失败，Gateway 可能仍在处理，本地状态仍需重置
+        except requests.exceptions.ConnectionError:
+            logger.warning("无法连接到 Gateway，连接被拒绝或网关未启动")
         except Exception as e:
             logger.error(f"发送 /stop 异常: {e}")
+        finally:
+            # 发送完成后重置标志，允许下次发送
+            self._stop_sending = False
 
     def _run_precheck(self):
         try:
@@ -167,7 +189,8 @@ class OpenClawBridge:
                 headers={
                     "Authorization": f"Bearer {self.token}",
                     "Content-Type": "application/json",
-                    "x-openclaw-session-key": "agent:main:jarvis",
+                    "x-openclaw-agent-id": self.agent_id,
+                    "x-openclaw-session-key": f"agent:{self.agent_id}:{self.agent_id}",
                 },
                 json={
                     "model": "openclaw",
@@ -231,7 +254,8 @@ class OpenClawBridge:
                 headers={
                     "Authorization": f"Bearer {self.token}",
                     "Content-Type": "application/json",
-                    "x-openclaw-session-key": "agent:main:jarvis",
+                    "x-openclaw-agent-id": self.agent_id,
+                    "x-openclaw-session-key": f"agent:{self.agent_id}:{self.agent_id}",
                 },
                 json={
                     "model": "openclaw",
@@ -310,11 +334,5 @@ class OpenClawBridge:
             return None
 
 
-_bridge = None
-
-
 def get_bridge(**kwargs):
-    global _bridge
-    if _bridge is None:
-        _bridge = OpenClawBridge(**kwargs)
-    return _bridge
+    return OpenClawBridge(**kwargs)
