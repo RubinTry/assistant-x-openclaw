@@ -148,6 +148,7 @@ def _load_assistant_config(assistant_id: str = None) -> dict:
 EXIT_KEYWORDS: set = set()
 INSTANT_EXIT_KEYWORDS: set = set()
 INSTANT_EXIT_FUZZY: tuple = ()
+RESTART_KEYWORDS: set = set()
 WAKE_LINES: list = []
 EXIT_LINES: list = []
 
@@ -155,12 +156,14 @@ EXIT_LINES: list = []
 def _apply_assistant_config(cfg: dict):
     """将 assistant 配置写入模块级变量"""
     global EXIT_KEYWORDS, INSTANT_EXIT_KEYWORDS, INSTANT_EXIT_FUZZY
+    global RESTART_KEYWORDS
     global WAKE_LINES, EXIT_LINES
 
     EXIT_KEYWORDS = set(cfg.get("exit_keywords", []))
     EXIT_KEYWORDS.update({"QUIT", "quit", "EXIT", "exit"})
     INSTANT_EXIT_KEYWORDS = set(cfg.get("instant_exit_keywords", []))
     INSTANT_EXIT_FUZZY = tuple(cfg.get("instant_exit_fuzzy", []))
+    RESTART_KEYWORDS = set(cfg.get("restart_keywords", []))
     WAKE_LINES = list(cfg.get("wake_lines", []))
     EXIT_LINES = list(cfg.get("exit_lines", []))
 
@@ -247,6 +250,7 @@ class VoiceAssistant:
         self._suppress_recognition_until_tts_done = False
         self._last_interrupt_time = 0  # 记录上次打断时间，用于防止误触发
         self._last_wake_time = 0  # 记录上次唤醒时间，唤醒后保护期内跳过退出检测
+        self._keyword_stream_reset_event = threading.Event()  # 用于通知主循环重置 keyword_stream
 
         self.keyword_spotter = self._create_keyword_spotter()
         # 始终创建流式识别器（用于连续对话模式）
@@ -736,6 +740,20 @@ class VoiceAssistant:
 
         while not self.stop_event.is_set():
             try:
+                # 检查是否需要重置 keyword_stream（由 exit_standby 触发）
+                if self._keyword_stream_reset_event.is_set():
+                    self._keyword_stream_reset_event.clear()
+                    print("[重置] 检测到退出信号，正在重置 keyword_stream 和 audio_stream...")
+                    stop_audio_stream()
+                    time.sleep(0.05)
+                    self._clear_queue()
+                    keyword_stream = self.keyword_spotter.create_stream()
+                    start_audio_stream()
+                    time.sleep(0.05)
+                    self._clear_queue()
+                    print("[重置] 已完成，继续等待唤醒词...")
+                    continue
+
                 if is_tts_playing():
                     try:
                         audio_data = self.audio_queue.get(timeout=0.5)
@@ -1037,6 +1055,14 @@ class VoiceAssistant:
                                 keyword_stream = self.keyword_spotter.create_stream()
                                 continue
 
+                            # 检测重启关键词
+                            _is_restart = _recog in RESTART_KEYWORDS
+                            if _is_restart:
+                                print(f"收到重启指令: {recognition_result.strip()}")
+                                self._restart_assistant()
+                                recognition_result = ""
+                                continue
+
                             self.visual.show_user_text(recognition_result)
                             if not self._ignore_next_result:
                                 threading.Thread(
@@ -1305,7 +1331,56 @@ class VoiceAssistant:
             while is_tts_playing():
                 time.sleep(0.05)
         self._clear_queue()
+        # 通知主循环重置 keyword_stream 和 audio_stream
+        self._keyword_stream_reset_event.set()
+        # 清除停止标志，确保不影响后续唤醒
+        self._stop_openclaw_request.clear()
         print("\n已退出监听，等待唤醒词...")
+
+    def _restart_assistant(self):
+        """重启语音助手：执行 start.sh 或 start.bat 脚本"""
+        print("\n[重启] 检测到重启指令，正在重启语音助手...")
+
+        # 停止当前助手
+        self.stop_event.set()
+
+        # 确定项目根目录和脚本路径
+        import subprocess
+        import platform
+        from pathlib import Path
+
+        project_dir = Path(__file__).parent.parent
+        is_windows = platform.system() == "Windows"
+
+        if is_windows:
+            script_path = project_dir / "scripts" / "start.bat"
+        else:
+            script_path = project_dir / "scripts" / "start.sh"
+
+        if not script_path.exists():
+            print(f"[重启] 错误: 找不到启动脚本 {script_path}")
+            return
+
+        print(f"[重启] 执行脚本: {script_path}")
+
+        try:
+            if is_windows:
+                # Windows 上使用 cmd 执行 bat 脚本
+                subprocess.Popen(
+                    ["cmd", "/c", "start", "/b", str(script_path)],
+                    cwd=str(project_dir),
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                )
+            else:
+                # macOS/Linux 上执行 sh 脚本
+                subprocess.Popen(
+                    ["bash", str(script_path)],
+                    cwd=str(project_dir),
+                    start_new_session=True,
+                )
+            print("[重启] 重启进程已启动，当前实例即将退出。")
+        except Exception as e:
+            print(f"[重启] 执行重启脚本失败: {e}")
 
 
 def assert_file_exists(filename):

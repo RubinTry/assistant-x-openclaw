@@ -36,6 +36,7 @@
                 "exit",
                 "quit",
                 "quiet",
+                "SHUT UP",
                 "退下",
                 "退下吧",
                 "没事了",
@@ -54,6 +55,12 @@
                 "step down",
                 "back off",
                 "back out"
+            ],
+            "restart_keywords": [
+                "restart",
+                "reboot",
+                "重启",
+                "重新启动"
             ]
         },
         {
@@ -99,6 +106,10 @@
                 "推一下",
                 "退一退",
                 "推一推"
+            ],
+            "restart_keywords": [
+                "重启",
+                "重新启动"
             ]
         }
     ]
