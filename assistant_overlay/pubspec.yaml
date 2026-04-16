@@ -39,8 +39,8 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  assets:
-    - assets/hongyue/
+  # assets:
+  #   - assets/hongyue/
 
   shaders:
     - shaders/metaballs_shader.frag
