@@ -98,6 +98,7 @@ mkdir -p ~/.openclaw/workspace/voice-assistant
 cd ~/.openclaw/workspace/voice-assistant
 git clone <仓库地址>
 cd assistant-x-openclaw
+mkdir models
 ```
 
 ### 2. 安装依赖
