@@ -22,6 +22,8 @@
 
 每个 assistant 角色对应一个 OpenClaw Agent。在 `assistants.json` 中配置角色时，需要把 `id` 字段设为你事先在 OpenClaw 中创建好的 Agent ID。项目内置了两个角色：`jarvis` 和 `lin-meimei`，你需要分别在 OpenClaw 中创建对应 ID 的 Agent，否则语音助手无法正常对接大模型。
 
+> ⚠️ **前提条件**：请确保你已经安装 OpenClaw 并能正常运行。安装请参考 [OpenClaw 官方文档](https://docs.openclaw.ai)。
+
 ```shell
 # 创建贾维斯智能体
 openclaw agents add jarvis
@@ -197,7 +199,7 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 | 7 | Qwen3-ASR 离线识别模型 | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
 | 8 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
 
-### 5. 准备音效文件
+### 5. 准备音效文件（新增assistant时才需要）
 
 在 `data/voices/` 目录下准备以下音效文件（WAV 格式）：
 
@@ -254,7 +256,7 @@ scripts\start.bat
 启动后，程序会显示"正在检测唤醒词..."，此时直接说出唤醒词即可唤醒：
 
 - **贾维斯**：说"贾维斯"或"加维斯"
-- **林妹妹**：说"林妹妹何在"或"林妹妹在吗"
+- **林妹妹**：说"林妹妹何在"
 
 听到确认音效和角色专属欢迎语后，即可开始对话。
 
@@ -291,9 +293,6 @@ scripts\start.bat
 
 # 切换到林妹妹  
 # 修改 assistants.json 中 "default": "lin-meimei"
-
-# 重启
-./scripts/restart_voice_assistant.sh
 ```
 
 > **提示**：运行时切换角色会自动应用，无需重启。
@@ -552,7 +551,6 @@ assistant-x-openclaw/
 ├── scripts/                  # 工具脚本
 │   ├── start.sh              # 启动脚本（macOS/Linux）
 │   ├── start.bat             # 启动脚本（Windows）
-│   ├── restart_voice_assistant.sh  # 重启脚本
 │   └── enroll_speaker.py     # 声纹录入工具
 ├── assistant_overlay/        # Flutter HUD 视觉特效应用
 ├── data/

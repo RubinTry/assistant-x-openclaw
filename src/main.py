@@ -811,6 +811,16 @@ class VoiceAssistant:
                 try:
                     audio_data = self.audio_queue.get(timeout=0.5)
                 except queue.Empty:
+                    if not self.is_awake and time.time() - self.last_activity_time > 30:
+                        print("[健康检查] 音频流超过30秒无数据，正在重建...")
+                        stop_audio_stream()
+                        time.sleep(0.1)
+                        self._clear_queue()
+                        keyword_stream = self.keyword_spotter.create_stream()
+                        start_audio_stream()
+                        time.sleep(0.1)
+                        self._clear_queue()
+                        self.last_activity_time = time.time()
                     continue
 
                 samples = audio_data.reshape(-1)
@@ -958,7 +968,7 @@ class VoiceAssistant:
                     silence_duration = current_time - self.last_voice_time
                     idle_duration = current_time - self.last_activity_time
 
-                    if self.continuous_mode and idle_duration > self.idle_timeout:
+                    if self.continuous_mode and silence_duration > self.idle_timeout:
                         print(f"\n连续对话超时（{self.idle_timeout}秒无活动），已退出")
                         self.continuous_mode = False
                         self.visual.hide_effects()
@@ -1270,7 +1280,7 @@ class VoiceAssistant:
                 print(f"[OpenClaw] 异常: {data}")
                 self.jarvis.on_error(data)
         finally:
-            # 无论正常完成还是被中断，都确保 _is_processing 复位
+            self.last_voice_time = time.time()
             self._is_processing = False
             self._is_openclaw_busy = False
 
