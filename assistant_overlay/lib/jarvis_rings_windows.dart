@@ -28,7 +28,7 @@ class JarvisRingsPainterWindows extends CustomPainter {
       case 'error':
         return const Color(0xFFFF4444);
       default:
-        return const Color(0xFF5FFFFF);
+        return const Color(0xFF42AEAE);
     }
   }
 
@@ -339,8 +339,8 @@ class JarvisRingsPainterWindows extends CustomPainter {
           fontWeight: FontWeight.bold,
           letterSpacing: 2,
           shadows: [
-            Shadow(color: primaryColor, blurRadius: 10),
-            Shadow(color: primaryColor.withAlpha(150), blurRadius: 20),
+            // Shadow(color: primaryColor, blurRadius: 10),
+            // Shadow(color: primaryColor.withAlpha(150), blurRadius: 20),
           ],
         ),
       ),

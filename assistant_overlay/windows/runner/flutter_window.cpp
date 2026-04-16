@@ -1,6 +1,9 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <dwmapi.h>
+
+#pragma comment(lib, "dwmapi.lib")
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -34,23 +37,28 @@ bool FlutterWindow::OnCreate() {
     ex_style |= WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT;
     SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style);
 
-    SetLayeredWindowAttributes(hwnd, RGB(255, 0, 255), 255, LWA_COLORKEY);
+    SetLayeredWindowAttributes(hwnd, RGB(0, 255, 255), 255, LWA_COLORKEY);
 
     HMONITOR primary = MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi = {sizeof(mi)};
     GetMonitorInfo(primary, &mi);
     int w = mi.rcMonitor.right - mi.rcMonitor.left;
     int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
-    SetWindowPos(hwnd, HWND_TOPMOST,
+    SetWindowPos(hwnd, nullptr,
                  mi.rcMonitor.left, mi.rcMonitor.top,
                  w, h,
-                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                 SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOZORDER);
   }
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
+    HWND hwnd = GetHandle();
+    if (hwnd) {
+      SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
   });
 
   flutter_controller_->ForceRedraw();

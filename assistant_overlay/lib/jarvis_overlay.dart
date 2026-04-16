@@ -27,11 +27,11 @@ class JarvisRingsPainter extends CustomPainter {
   Color get primaryColor {
     switch (currentEffect) {
       case 'success':
-        return const Color(0xFF00FF66);
+        return const Color(0xFF2A9999);
       case 'error':
         return const Color(0xFFFF4444);
       default:
-        return const Color(0xFF5FFFFF);
+        return const Color(0xFF3A9F9F);
     }
   }
 
@@ -442,7 +442,7 @@ class JarvisAgentVisual implements AgentVisual {
   late AnimationController _rightTerminalSlideController;
 
   static const Color _jarvisBlue = Color(0xFF66FFFF);
-  static const Color _terminalBackground = Color(0xFF0CDDFF);
+  static const Color _terminalBackground = Color(0xCC0A1628);
 
   void _initAnimationControllers() {
     _outerRingController = AnimationController(
@@ -656,7 +656,8 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateOuterRingAngle() {
     final delta = _outerRingController.value - _lastOuterValue;
     _lastOuterValue = _outerRingController.value;
-    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier =
+        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _outerRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -667,7 +668,8 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateArcsAngle() {
     final delta = _arcsController.value - _lastArcsValue;
     _lastArcsValue = _arcsController.value;
-    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier =
+        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _arcsAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -678,7 +680,8 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateDataRingAngle() {
     final delta = _dataRingController.value - _lastDataRingValue;
     _lastDataRingValue = _dataRingController.value;
-    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier =
+        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _dataRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -689,7 +692,8 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateInnerRingAngle() {
     final delta = _innerRingController.value - _lastInnerRingValue;
     _lastInnerRingValue = _innerRingController.value;
-    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier =
+        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _innerRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -828,7 +832,11 @@ class JarvisAgentVisual implements AgentVisual {
                                   pulseValue: _pulseController.value,
                                   currentEffect: _currentEffect,
                                   speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
+                                      (_ringScaleController.value - 1.0).clamp(
+                                        0.0,
+                                        0.1,
+                                      ) *
+                                      10,
                                 )
                               : JarvisRingsPainter(
                                   outerRingRotation:
@@ -846,7 +854,11 @@ class JarvisAgentVisual implements AgentVisual {
                                   pulseValue: _pulseController.value,
                                   currentEffect: _currentEffect,
                                   speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
+                                      (_ringScaleController.value - 1.0).clamp(
+                                        0.0,
+                                        0.1,
+                                      ) *
+                                      10,
                                 ),
                         ),
                       );
@@ -918,9 +930,9 @@ class JarvisAgentVisual implements AgentVisual {
       width: 350,
       constraints: BoxConstraints(maxHeight: maxHeight),
       decoration: BoxDecoration(
-        color: _terminalBackground.withAlpha(100),
+        color: _terminalBackground,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _jarvisBlue.withAlpha(150), width: 0),
+        border: Border.all(color: _jarvisBlue.withAlpha(200), width: 1),
       ),
       padding: const EdgeInsets.all(12),
       child: ListView(
