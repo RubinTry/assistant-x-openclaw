@@ -6,6 +6,11 @@
             "name": "贾维斯",
             "enabled": true,
             "visual": "jarvis",
+            "components": {
+                "feedback": "jarvis",
+                "visual": "jarvis",
+                "tts": "jarvis"
+            },
             "keywords_file": "keywords/jarvis.txt",
             "asr_mode": "sense_voice_en",
             "wake_lines": [
@@ -68,6 +73,49 @@
             "name": "林妹妹",
             "enabled": true,
             "visual": "jarvis",
+            "components": {
+                "feedback": "custom",
+                "visual": "custom",
+                "tts": "custom"
+            },
+            "tts_config": {
+                "engine": "vits",
+                "model_dir": "models/vits-melo-tts-zh_en",
+                "speed": 0.85
+            },
+            "visual_config": {
+                "agent_id": "lin-meimei"
+            },
+            "feedback_config": {
+                "sounds": {
+                    "processing": "processing_linmeimei.wav",
+                    "waiting": "processing_linmeimei.wav"
+                },
+                "notification_prefix": "林妹妹",
+                "hud": {
+                    "init": [
+                        "～～～～～～～～～～～～～～～～～～～～",
+                        "　　　　🌸 林妹妹驾到 🌸",
+                        "～～～～～～～～～～～～～～～～～～～～"
+                    ],
+                    "exit": [
+                        "妹妹歇着了...",
+                        "有事再唤妹妹..."
+                    ],
+                    "error": [
+                        "哎呀，出岔子了...",
+                        "这可不妙..."
+                    ],
+                    "thinking": [
+                        "容妹妹想想...",
+                        "且慢，让我琢磨琢磨..."
+                    ],
+                    "waiting": [
+                        "妹妹在听呢...",
+                        "哥哥请讲..."
+                    ]
+                }
+            },
             "keywords_file": "keywords/lin-meimei.txt",
             "wake_lines": [
                 "哟～这会子才想起我来，我还以为哥哥早把我给忘了呢。",

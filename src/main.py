@@ -80,12 +80,6 @@ from tts import (
 )
 from openclaw_bridge import get_bridge
 from assistants import (
-    AssistantFeedback,
-    AssistantVisual,
-    AssistantTTS,
-    get_feedback,
-    get_visual_effects,
-    get_tts,
     AssistantManager,
     AssistantInstance,
     get_manager,
@@ -241,21 +235,23 @@ class VoiceAssistant:
         self.last_voice_time = time.time()
         self.idle_timeout = 30
         self.last_activity_time = time.time()
-        self._last_tts_check = False
 
         self._is_openclaw_busy = False
+        self._is_processing = False  # True: 从指令发出到TTS播报完毕的全流程
         self._openclaw_request_active = threading.Event()
         self._stop_openclaw_request = threading.Event()
         self._ignore_next_result = False
         self._suppress_recognition_until_tts_done = False
         self._last_interrupt_time = 0  # 记录上次打断时间，用于防止误触发
         self._last_wake_time = 0  # 记录上次唤醒时间，唤醒后保护期内跳过退出检测
-        self._keyword_stream_reset_event = threading.Event()  # 用于通知主循环重置 keyword_stream
+        self._keyword_stream_reset_event = (
+            threading.Event()
+        )  # 用于通知主循环重置 keyword_stream
 
         self.keyword_spotter = self._create_keyword_spotter()
         # 始终创建流式识别器（用于连续对话模式）
         self.recognizer = self._create_recognizer()
-        
+
         # 根据 assistant 配置决定使用哪种识别模式
         asr_mode = self.current_cfg.get("asr_mode", "streaming")
         if asr_mode == "sense_voice_en":
@@ -291,7 +287,7 @@ class VoiceAssistant:
         else:
             self._use_offline_asr = False
             print("[配置] 使用流式识别模式（热词增强）")
-        
+
         self._check_microphone()
 
         # OpenClaw bridge 会在切换 assistant 时动态创建
@@ -323,7 +319,10 @@ class VoiceAssistant:
         # 根据 assistant 配置决定使用哪种识别模式
         asr_mode = self.current_cfg.get("asr_mode", "streaming")
         if asr_mode == "sense_voice_en":
-            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+            if (
+                hasattr(self, "offline_recognizer")
+                and self.offline_recognizer is not None
+            ):
                 self._use_offline_asr = True
                 print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式")
             else:
@@ -331,12 +330,19 @@ class VoiceAssistant:
                 if sense_result and sense_result[0] is not None:
                     self.offline_recognizer, self.vad_config = sense_result
                     self._use_offline_asr = True
-                    print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式 (English only)")
+                    print(
+                        f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式 (English only)"
+                    )
                 else:
                     self._use_offline_asr = False
-                    print(f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别")
+                    print(
+                        f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别"
+                    )
         elif asr_mode == "sense_voice":
-            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+            if (
+                hasattr(self, "offline_recognizer")
+                and self.offline_recognizer is not None
+            ):
                 self._use_offline_asr = True
                 print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式")
             else:
@@ -344,12 +350,19 @@ class VoiceAssistant:
                 if sense_result and sense_result[0] is not None:
                     self.offline_recognizer, self.vad_config = sense_result
                     self._use_offline_asr = True
-                    print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式")
+                    print(
+                        f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式"
+                    )
                 else:
                     self._use_offline_asr = False
-                    print(f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别")
+                    print(
+                        f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别"
+                    )
         elif asr_mode == "offline":
-            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+            if (
+                hasattr(self, "offline_recognizer")
+                and self.offline_recognizer is not None
+            ):
                 self._use_offline_asr = True
                 print(f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式")
             else:
@@ -357,10 +370,14 @@ class VoiceAssistant:
                 if offline_result and offline_result[0] is not None:
                     self.offline_recognizer, self.vad_config, _ = offline_result
                     self._use_offline_asr = True
-                    print(f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式")
+                    print(
+                        f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式"
+                    )
                 else:
                     self._use_offline_asr = False
-                    print(f"[配置] {self.current_cfg['name']} Qwen3-ASR 不可用，使用流式识别")
+                    print(
+                        f"[配置] {self.current_cfg['name']} Qwen3-ASR 不可用，使用流式识别"
+                    )
         else:
             self._use_offline_asr = False
             print(f"[配置] {self.current_cfg['name']} 使用流式识别模式")
@@ -467,7 +484,7 @@ class VoiceAssistant:
 
     def _create_sense_voice_recognizer(self, language="auto"):
         """创建 SenseVoice 离线识别器和 VAD 配置
-        
+
         Args:
             language: 语言参数，auto/zh/en/ko/ja/yue
         """
@@ -643,9 +660,9 @@ class VoiceAssistant:
         """音频回调函数"""
         if status:
             print(status)
-        if not is_tts_playing():
-            if self.audio_queue.qsize() < 100:
-                self.audio_queue.put(indata.copy())
+        # 始终入队音频，保证处理期间（含TTS播报）也能检测唤醒词打断
+        if self.audio_queue.qsize() < 100:
+            self.audio_queue.put(indata.copy())
 
     def _clear_queue(self):
         """清空音频队列"""
@@ -743,7 +760,9 @@ class VoiceAssistant:
                 # 检查是否需要重置 keyword_stream（由 exit_standby 触发）
                 if self._keyword_stream_reset_event.is_set():
                     self._keyword_stream_reset_event.clear()
-                    print("[重置] 检测到退出信号，正在重置 keyword_stream 和 audio_stream...")
+                    print(
+                        "[重置] 检测到退出信号，正在重置 keyword_stream 和 audio_stream..."
+                    )
                     stop_audio_stream()
                     time.sleep(0.05)
                     self._clear_queue()
@@ -754,29 +773,30 @@ class VoiceAssistant:
                     print("[重置] 已完成，继续等待唤醒词...")
                     continue
 
-                if is_tts_playing():
+                # 处理中（OpenClaw请求→TTS播报完毕），只检测唤醒词以支持打断
+                if self._is_processing:
                     try:
                         audio_data = self.audio_queue.get(timeout=0.5)
                     except queue.Empty:
-                        time.sleep(0.1)
                         continue
 
                     samples = audio_data.reshape(-1)
-
                     keyword_stream.accept_waveform(self.sample_rate, samples)
 
                     while self.keyword_spotter.is_ready(keyword_stream):
                         self.keyword_spotter.decode_stream(keyword_stream)
                         kw_result = self.keyword_spotter.get_result(keyword_stream)
                         if kw_result:
-                            # 只有当前assistant的唤醒词才能打断
                             detected_id = self._detect_assistant_from_keyword(kw_result)
                             if detected_id != self.current_cfg["id"]:
                                 continue
                             print(f"\n[打断] 检测到唤醒词: {kw_result}")
+                            # 打断整个处理流程：停止TTS + 中断OpenClaw
                             stop_tts()
                             self._interrupt_openclaw()
-                            self._ignore_next_result = True
+                            # 重置识别器，准备接收新指令
+                            recognition_stream = self.recognizer.create_stream()
+                            recognition_result = ""
                             self.keyword_spotter.reset_stream(keyword_stream)
                             keyword_stream = self.keyword_spotter.create_stream()
                             print("\n请说出指令...")
@@ -785,16 +805,8 @@ class VoiceAssistant:
                     self._clear_queue()
                     continue
 
-                if self._last_tts_check and not is_tts_playing():
-                    self._clear_queue()
-                    self._last_tts_check = False
-                    time.sleep(0.1)
-                    continue
-
                 if audio_stream is None:
                     start_audio_stream()
-
-                self._last_tts_check = is_tts_playing()
 
                 try:
                     audio_data = self.audio_queue.get(timeout=0.5)
@@ -882,7 +894,9 @@ class VoiceAssistant:
 
                             self._suppress_recognition_until_tts_done = False
                             self._ignore_next_result = False
-                            self._last_wake_time = time.time()  # 记录唤醒时间，唤醒后保护期内跳过退出检测
+                            self._last_wake_time = (
+                                time.time()
+                            )  # 记录唤醒时间，唤醒后保护期内跳过退出检测
 
                             for _ in range(20):
                                 self._clear_queue()
@@ -893,63 +907,11 @@ class VoiceAssistant:
                                 self._clear_queue()
                             continue
                     else:
-                        if self._is_openclaw_busy:
-                            kw_result = None
-                            keyword_stream.accept_waveform(self.sample_rate, samples)
-
-                            while self.keyword_spotter.is_ready(keyword_stream):
-                                self.keyword_spotter.decode_stream(keyword_stream)
-                                kw_result = self.keyword_spotter.get_result(
-                                    keyword_stream
-                                )
-                                if kw_result:
-                                    print(f"\n[打断] 检测到唤醒词: {kw_result}")
-                                    self._interrupt_openclaw()
-                                    self._ignore_next_result = True
-                                    time.sleep(0.1)
-                                    self._clear_queue()
-                                    self.keyword_spotter.reset_stream(keyword_stream)
-                                    keyword_stream = (
-                                        self.keyword_spotter.create_stream()
-                                    )
-                                    recognition_stream = self.recognizer.create_stream()
-                                    recognition_result = ""
-                                    print("\n请说出指令...")
-                                    break
                         if not self.is_awake:
                             continue
 
                 else:
-                    # 已进入唤醒状态，需要持续检测唤醒词以支持打断
-                    if self._is_openclaw_busy:
-                        # OpenClaw 正在处理，检测唤醒词来打断
-                        keyword_stream.accept_waveform(self.sample_rate, samples)
-                        
-                        while self.keyword_spotter.is_ready(keyword_stream):
-                            self.keyword_spotter.decode_stream(keyword_stream)
-                            kw_result = self.keyword_spotter.get_result(keyword_stream)
-                            if kw_result:
-                                # 只有当前assistant的唤醒词才能打断
-                                detected_id = self._detect_assistant_from_keyword(kw_result)
-                                if detected_id != self.current_cfg["id"]:
-                                    continue
-                                print(f"\n[打断] 检测到唤醒词: {kw_result}")
-                                # 打断当前请求
-                                self._interrupt_openclaw()
-                                self._ignore_next_result = True
-                                
-                                time.sleep(0.1)
-                                self._clear_queue()
-                                self.keyword_spotter.reset_stream(keyword_stream)
-                                keyword_stream = self.keyword_spotter.create_stream()
-                                recognition_stream = self.recognizer.create_stream()
-                                recognition_result = ""
-                                print("\n请说出指令...")
-                                break
-                        # 打断后继续循环，不再处理识别
-                        continue
-                    
-                    # OpenClaw 空闲，正常处理语音识别
+                    # 已唤醒且不在处理中，正常处理语音识别
                     if recognition_stream is None:
                         recognition_stream = self.recognizer.create_stream()
                     recognition_stream.accept_waveform(self.sample_rate, samples)
@@ -971,11 +933,13 @@ class VoiceAssistant:
                     # 打断后 2 秒内、唤醒后 2 秒内跳过退出检测，避免残留音频误触发
                     _recent_interrupt = (time.time() - self._last_interrupt_time) < 2.0
                     _recent_wake = (time.time() - self._last_wake_time) < 2.0
-                    _early_exit = _early_recog and not _recent_interrupt and not _recent_wake and (
-                        _early_recog in EXIT_KEYWORDS
-                        or any(
-                            kw in _early_recog
-                            for kw in INSTANT_EXIT_FUZZY
+                    _early_exit = (
+                        _early_recog
+                        and not _recent_interrupt
+                        and not _recent_wake
+                        and (
+                            _early_recog in EXIT_KEYWORDS
+                            or any(kw in _early_recog for kw in INSTANT_EXIT_FUZZY)
                         )
                     )
                     if _early_exit:
@@ -1026,12 +990,18 @@ class VoiceAssistant:
 
                             _recog = recognition_result.strip()
                             # 打断后 2 秒内、唤醒后 2 秒内跳过退出检测，避免残留音频误触发
-                            _recent_interrupt = (time.time() - self._last_interrupt_time) < 2.0
+                            _recent_interrupt = (
+                                time.time() - self._last_interrupt_time
+                            ) < 2.0
                             _recent_wake = (time.time() - self._last_wake_time) < 2.0
-                            _is_exit = not _recent_interrupt and not _recent_wake and (_recog in EXIT_KEYWORDS or any(
-                                kw in _recog
-                                for kw in INSTANT_EXIT_FUZZY
-                            ))
+                            _is_exit = (
+                                not _recent_interrupt
+                                and not _recent_wake
+                                and (
+                                    _recog in EXIT_KEYWORDS
+                                    or any(kw in _recog for kw in INSTANT_EXIT_FUZZY)
+                                )
+                            )
                             if _is_exit:
                                 print(f"收到退出指令: {recognition_result.strip()}")
                                 self._interrupt_openclaw()
@@ -1149,6 +1119,7 @@ class VoiceAssistant:
         self._stop_openclaw_request.set()
         # 立即重置状态，确保可以重新唤醒
         self._is_openclaw_busy = False
+        self._is_processing = False
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         # 停止 TTS 播放
@@ -1156,7 +1127,7 @@ class VoiceAssistant:
         # 记录打断时间，用于防止后续误触发退出检测
         self._last_interrupt_time = time.time()
         print("[打断] 已发出中断信号，状态已重置")
-    
+
     def _interrupt_openclaw_silent(self):
         """静默中断：仅取消请求和重置状态，不发送 /stop 命令
         用于 exit_standby 等已经明确要退出的场景，避免重复发送 /stop
@@ -1164,6 +1135,7 @@ class VoiceAssistant:
         self.openclaw.cancel_current_request()
         self._stop_openclaw_request.set()
         self._is_openclaw_busy = False
+        self._is_processing = False
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         stop_tts()
@@ -1179,120 +1151,128 @@ class VoiceAssistant:
 
         print("◈ 正在思考...", end="", flush=True)
 
+        self._is_processing = True  # 标记全流程：指令发出→OpenClaw回复→TTS播报完毕
         self._is_openclaw_busy = True
         self._stop_openclaw_request.clear()
         self._openclaw_request_active.set()
 
-        import threading
-        import queue
+        try:
+            import threading
+            import queue
 
-        result_queue = queue.Queue()
+            result_queue = queue.Queue()
 
-        def _openclaw_request():
-            self._waiting_active = threading.Event()
-            self._waiting_active.set()
+            def _openclaw_request():
+                self._waiting_active = threading.Event()
+                self._waiting_active.set()
 
-            def _waiting_sound_loop():
-                while self._waiting_active.is_set():
-                    self.jarvis.play_sound("waiting")
-                    for _ in range(10):
-                        if not self._waiting_active.is_set():
-                            return
-                        time.sleep(0.3)
+                def _waiting_sound_loop():
+                    while self._waiting_active.is_set():
+                        self.jarvis.play_sound("waiting")
+                        for _ in range(10):
+                            if not self._waiting_active.is_set():
+                                return
+                            time.sleep(0.3)
 
-            waiting_thread = threading.Thread(target=_waiting_sound_loop, daemon=True)
-            waiting_thread.start()
-
-            received_chunks = []
-            stop_requested = threading.Event()
-
-            def _on_stream_start():
-                if self._stop_openclaw_request.is_set():
-                    stop_requested.set()
-                    return
-                self._waiting_active.clear()
-                time.sleep(0.05)
-                print("\n[← OpenClaw] ", end="", flush=True)
-
-            def _on_stream_chunk(chunk):
-                if self._stop_openclaw_request.is_set():
-                    stop_requested.set()
-                    return
-                received_chunks.append(chunk)
-                full_text = "".join(received_chunks)
-                print(chunk, end="", flush=True)
-                self.visual.show_ai_text(full_text)
-
-            def _on_stream_end():
-                if not stop_requested.is_set():
-                    self._waiting_active.clear()
-
-            try:
-                reply = self.openclaw.send_and_wait_stream(
-                    text,
-                    on_chunk=_on_stream_chunk,
-                    on_start=_on_stream_start,
-                    on_end=_on_stream_end,
+                waiting_thread = threading.Thread(
+                    target=_waiting_sound_loop, daemon=True
                 )
-                self._waiting_active.clear()
-                waiting_thread.join(timeout=0.5)
-                result_queue.put(("success", reply))
-            except Exception as e:
-                self._waiting_active.clear()
-                result_queue.put(("error", str(e)))
-            finally:
-                # 确保无论发生什么都会重置状态
-                self._is_openclaw_busy = False
-                self._openclaw_request_active.clear()
+                waiting_thread.start()
 
-        request_thread = threading.Thread(target=_openclaw_request, daemon=True)
-        request_thread.start()
+                received_chunks = []
+                stop_requested = threading.Event()
 
-        while True:
-            try:
-                status, data = result_queue.get(timeout=0.5)
-                break
-            except queue.Empty:
-                if self._stop_openclaw_request.is_set():
-                    # 只在第一次检测到打断时发送 stop 命令
-                    self.openclaw.send_stop_command()
-                    self.openclaw.cancel_current_request()
-                    print("\n[打断] OpenClaw 请求已中断")
+                def _on_stream_start():
+                    if self._stop_openclaw_request.is_set():
+                        stop_requested.set()
+                        return
+                    self._waiting_active.clear()
+                    time.sleep(0.05)
+                    print("\n[← OpenClaw] ", end="", flush=True)
+
+                def _on_stream_chunk(chunk):
+                    if self._stop_openclaw_request.is_set():
+                        stop_requested.set()
+                        return
+                    received_chunks.append(chunk)
+                    full_text = "".join(received_chunks)
+                    print(chunk, end="", flush=True)
+                    self.visual.show_ai_text(full_text)
+
+                def _on_stream_end():
+                    if not stop_requested.is_set():
+                        self._waiting_active.clear()
+
+                try:
+                    reply = self.openclaw.send_and_wait_stream(
+                        text,
+                        on_chunk=_on_stream_chunk,
+                        on_start=_on_stream_start,
+                        on_end=_on_stream_end,
+                    )
+                    self._waiting_active.clear()
+                    waiting_thread.join(timeout=0.5)
+                    result_queue.put(("success", reply))
+                except Exception as e:
+                    self._waiting_active.clear()
+                    result_queue.put(("error", str(e)))
+                finally:
                     self._is_openclaw_busy = False
+                    self._openclaw_request_active.clear()
+
+            request_thread = threading.Thread(target=_openclaw_request, daemon=True)
+            request_thread.start()
+
+            while True:
+                try:
+                    status, data = result_queue.get(timeout=0.5)
+                    break
+                except queue.Empty:
+                    if self._stop_openclaw_request.is_set():
+                        self.openclaw.send_stop_command()
+                        self.openclaw.cancel_current_request()
+                        print("\n[打断] OpenClaw 请求已中断")
+                        return
+
+            if status == "success":
+                reply = data
+                if reply:
+                    print()
+                    # 整体合成播放
+                    cleaned = _clean_for_tts(reply)
+                    if cleaned:
+                        from tts import _tts_playing
+
+                        _tts_playing.set()
+                        try:
+                            result = self.tts.synthesize_to_array(cleaned)
+                            if result and not self._stop_openclaw_request.is_set():
+                                import sounddevice as sd
+
+                                audio_data, sample_rate = result
+                                sd.play(audio_data * 1.5, samplerate=sample_rate)
+                                sd.wait()
+                        finally:
+                            _tts_playing.clear()
+
+                        # TTS播报结束，检查是否被中断
+                        if self._stop_openclaw_request.is_set():
+                            print("\n[打断] TTS播报被中断，跳过收尾音效")
+                            return
+
+                    print("◈ 继续说吧，我在听着...", flush=True)
+                    self.jarvis.play_sound("continue")
                     return
-
-        if status == "success":
-            reply = data
-            if reply:
-                print()
-                # 整体合成播放
-                cleaned = _clean_for_tts(reply)
-                if cleaned:
-                    from tts import _tts_playing
-
-                    _tts_playing.set()
-                    try:
-                        result = self.tts.synthesize_to_array(cleaned)
-                        if result and not self._stop_openclaw_request.is_set():
-                            import sounddevice as sd
-
-                            audio_data, sample_rate = result
-                            sd.play(audio_data * 1.5, samplerate=sample_rate)
-                            sd.wait()
-                    finally:
-                        _tts_playing.clear()
-                print("◈ 继续说吧，我在听着...", flush=True)
-                self.jarvis.play_sound("continue")
-                self._is_openclaw_busy = False
-                return
+                else:
+                    print("\n[← OpenClaw] (无回复)")
+                    self.jarvis.on_error("无回复")
             else:
-                print("\n[← OpenClaw] (无回复)")
-                self.jarvis.on_error("无回复")
-        else:
-            print(f"[OpenClaw] 异常: {data}")
-            self.jarvis.on_error(data)
-
-        self._is_openclaw_busy = False
+                print(f"[OpenClaw] 异常: {data}")
+                self.jarvis.on_error(data)
+        finally:
+            # 无论正常完成还是被中断，都确保 _is_processing 复位
+            self._is_processing = False
+            self._is_openclaw_busy = False
 
     def run(self):
         """运行语音助手"""
@@ -1369,7 +1349,8 @@ class VoiceAssistant:
                 subprocess.Popen(
                     ["cmd", "/c", "start", "/b", str(script_path)],
                     cwd=str(project_dir),
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.DETACHED_PROCESS,
                 )
             else:
                 # macOS/Linux 上执行 sh 脚本
@@ -1449,7 +1430,9 @@ def get_args():
     # SenseVoice 模型参数（离线识别）
     _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _sense_voice_model_dir = os.path.join(
-        _project_dir, "models", "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+        _project_dir,
+        "models",
+        "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
     )
     parser.add_argument(
         "--sense-voice-model",
@@ -1473,7 +1456,7 @@ def get_args():
         default="auto",
         help="语言：auto, zh, en, ko, ja, yue",
     )
-    
+
     # Qwen3-ASR 模型参数（离线识别）
     _qwen3_model_dir = os.path.join(
         _project_dir, "models", "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25"
@@ -1525,7 +1508,7 @@ def main():
 
     # 使用 global.txt 作为唤醒词文件（由 start.sh 脚本合并生成）
     args.keywords_file = os.path.join(_PROJECT_DIR, "keywords", "global.txt")
-    
+
     # 构建 keyword_to_assistant_id 映射（从所有 assistant 配置中读取）
     keyword_mapping = {}
     for assistant in all_assistants:
@@ -1543,7 +1526,7 @@ def main():
                             keyword_text = line.split("@")[-1].strip()
                             keyword_mapping[keyword_text] = assistant_id
                 print(f"[配置] 加载 {assistant['name']} ({assistant_id}) 的唤醒词映射")
-    
+
     print(f"[配置] 使用唤醒词文件: {args.keywords_file}")
     print(f"[配置] 唤醒词映射: {keyword_mapping}")
 
@@ -1567,7 +1550,7 @@ def main():
     api_thread.start()
     print(f"API server started on port {API_PORT}")
 
-    with open(PID_FILE, "w") as f:
+    with open(PID_FILE, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 
     try:
