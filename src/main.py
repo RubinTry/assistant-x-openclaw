@@ -250,12 +250,14 @@ class VoiceAssistant:
         self._suppress_recognition_until_tts_done = False
         self._last_interrupt_time = 0  # 记录上次打断时间，用于防止误触发
         self._last_wake_time = 0  # 记录上次唤醒时间，唤醒后保护期内跳过退出检测
-        self._keyword_stream_reset_event = threading.Event()  # 用于通知主循环重置 keyword_stream
+        self._keyword_stream_reset_event = (
+            threading.Event()
+        )  # 用于通知主循环重置 keyword_stream
 
         self.keyword_spotter = self._create_keyword_spotter()
         # 始终创建流式识别器（用于连续对话模式）
         self.recognizer = self._create_recognizer()
-        
+
         # 根据 assistant 配置决定使用哪种识别模式
         asr_mode = self.current_cfg.get("asr_mode", "streaming")
         if asr_mode == "sense_voice_en":
@@ -291,7 +293,7 @@ class VoiceAssistant:
         else:
             self._use_offline_asr = False
             print("[配置] 使用流式识别模式（热词增强）")
-        
+
         self._check_microphone()
 
         # OpenClaw bridge 会在切换 assistant 时动态创建
@@ -323,7 +325,10 @@ class VoiceAssistant:
         # 根据 assistant 配置决定使用哪种识别模式
         asr_mode = self.current_cfg.get("asr_mode", "streaming")
         if asr_mode == "sense_voice_en":
-            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+            if (
+                hasattr(self, "offline_recognizer")
+                and self.offline_recognizer is not None
+            ):
                 self._use_offline_asr = True
                 print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式")
             else:
@@ -331,12 +336,19 @@ class VoiceAssistant:
                 if sense_result and sense_result[0] is not None:
                     self.offline_recognizer, self.vad_config = sense_result
                     self._use_offline_asr = True
-                    print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式 (English only)")
+                    print(
+                        f"[配置] {self.current_cfg['name']} 使用 SenseVoice 英文模式 (English only)"
+                    )
                 else:
                     self._use_offline_asr = False
-                    print(f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别")
+                    print(
+                        f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别"
+                    )
         elif asr_mode == "sense_voice":
-            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+            if (
+                hasattr(self, "offline_recognizer")
+                and self.offline_recognizer is not None
+            ):
                 self._use_offline_asr = True
                 print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式")
             else:
@@ -344,12 +356,19 @@ class VoiceAssistant:
                 if sense_result and sense_result[0] is not None:
                     self.offline_recognizer, self.vad_config = sense_result
                     self._use_offline_asr = True
-                    print(f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式")
+                    print(
+                        f"[配置] {self.current_cfg['name']} 使用 SenseVoice 多语言模式"
+                    )
                 else:
                     self._use_offline_asr = False
-                    print(f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别")
+                    print(
+                        f"[配置] {self.current_cfg['name']} SenseVoice 不可用，使用流式识别"
+                    )
         elif asr_mode == "offline":
-            if hasattr(self, 'offline_recognizer') and self.offline_recognizer is not None:
+            if (
+                hasattr(self, "offline_recognizer")
+                and self.offline_recognizer is not None
+            ):
                 self._use_offline_asr = True
                 print(f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式")
             else:
@@ -357,10 +376,14 @@ class VoiceAssistant:
                 if offline_result and offline_result[0] is not None:
                     self.offline_recognizer, self.vad_config, _ = offline_result
                     self._use_offline_asr = True
-                    print(f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式")
+                    print(
+                        f"[配置] {self.current_cfg['name']} 使用 Qwen3-ASR 离线识别模式"
+                    )
                 else:
                     self._use_offline_asr = False
-                    print(f"[配置] {self.current_cfg['name']} Qwen3-ASR 不可用，使用流式识别")
+                    print(
+                        f"[配置] {self.current_cfg['name']} Qwen3-ASR 不可用，使用流式识别"
+                    )
         else:
             self._use_offline_asr = False
             print(f"[配置] {self.current_cfg['name']} 使用流式识别模式")
@@ -467,7 +490,7 @@ class VoiceAssistant:
 
     def _create_sense_voice_recognizer(self, language="auto"):
         """创建 SenseVoice 离线识别器和 VAD 配置
-        
+
         Args:
             language: 语言参数，auto/zh/en/ko/ja/yue
         """
@@ -743,7 +766,9 @@ class VoiceAssistant:
                 # 检查是否需要重置 keyword_stream（由 exit_standby 触发）
                 if self._keyword_stream_reset_event.is_set():
                     self._keyword_stream_reset_event.clear()
-                    print("[重置] 检测到退出信号，正在重置 keyword_stream 和 audio_stream...")
+                    print(
+                        "[重置] 检测到退出信号，正在重置 keyword_stream 和 audio_stream..."
+                    )
                     stop_audio_stream()
                     time.sleep(0.05)
                     self._clear_queue()
@@ -882,7 +907,9 @@ class VoiceAssistant:
 
                             self._suppress_recognition_until_tts_done = False
                             self._ignore_next_result = False
-                            self._last_wake_time = time.time()  # 记录唤醒时间，唤醒后保护期内跳过退出检测
+                            self._last_wake_time = (
+                                time.time()
+                            )  # 记录唤醒时间，唤醒后保护期内跳过退出检测
 
                             for _ in range(20):
                                 self._clear_queue()
@@ -924,20 +951,22 @@ class VoiceAssistant:
                     if self._is_openclaw_busy:
                         # OpenClaw 正在处理，检测唤醒词来打断
                         keyword_stream.accept_waveform(self.sample_rate, samples)
-                        
+
                         while self.keyword_spotter.is_ready(keyword_stream):
                             self.keyword_spotter.decode_stream(keyword_stream)
                             kw_result = self.keyword_spotter.get_result(keyword_stream)
                             if kw_result:
                                 # 只有当前assistant的唤醒词才能打断
-                                detected_id = self._detect_assistant_from_keyword(kw_result)
+                                detected_id = self._detect_assistant_from_keyword(
+                                    kw_result
+                                )
                                 if detected_id != self.current_cfg["id"]:
                                     continue
                                 print(f"\n[打断] 检测到唤醒词: {kw_result}")
                                 # 打断当前请求
                                 self._interrupt_openclaw()
                                 self._ignore_next_result = True
-                                
+
                                 time.sleep(0.1)
                                 self._clear_queue()
                                 self.keyword_spotter.reset_stream(keyword_stream)
@@ -948,7 +977,7 @@ class VoiceAssistant:
                                 break
                         # 打断后继续循环，不再处理识别
                         continue
-                    
+
                     # OpenClaw 空闲，正常处理语音识别
                     if recognition_stream is None:
                         recognition_stream = self.recognizer.create_stream()
@@ -971,11 +1000,13 @@ class VoiceAssistant:
                     # 打断后 2 秒内、唤醒后 2 秒内跳过退出检测，避免残留音频误触发
                     _recent_interrupt = (time.time() - self._last_interrupt_time) < 2.0
                     _recent_wake = (time.time() - self._last_wake_time) < 2.0
-                    _early_exit = _early_recog and not _recent_interrupt and not _recent_wake and (
-                        _early_recog in EXIT_KEYWORDS
-                        or any(
-                            kw in _early_recog
-                            for kw in INSTANT_EXIT_FUZZY
+                    _early_exit = (
+                        _early_recog
+                        and not _recent_interrupt
+                        and not _recent_wake
+                        and (
+                            _early_recog in EXIT_KEYWORDS
+                            or any(kw in _early_recog for kw in INSTANT_EXIT_FUZZY)
                         )
                     )
                     if _early_exit:
@@ -1026,12 +1057,18 @@ class VoiceAssistant:
 
                             _recog = recognition_result.strip()
                             # 打断后 2 秒内、唤醒后 2 秒内跳过退出检测，避免残留音频误触发
-                            _recent_interrupt = (time.time() - self._last_interrupt_time) < 2.0
+                            _recent_interrupt = (
+                                time.time() - self._last_interrupt_time
+                            ) < 2.0
                             _recent_wake = (time.time() - self._last_wake_time) < 2.0
-                            _is_exit = not _recent_interrupt and not _recent_wake and (_recog in EXIT_KEYWORDS or any(
-                                kw in _recog
-                                for kw in INSTANT_EXIT_FUZZY
-                            ))
+                            _is_exit = (
+                                not _recent_interrupt
+                                and not _recent_wake
+                                and (
+                                    _recog in EXIT_KEYWORDS
+                                    or any(kw in _recog for kw in INSTANT_EXIT_FUZZY)
+                                )
+                            )
                             if _is_exit:
                                 print(f"收到退出指令: {recognition_result.strip()}")
                                 self._interrupt_openclaw()
@@ -1156,7 +1193,7 @@ class VoiceAssistant:
         # 记录打断时间，用于防止后续误触发退出检测
         self._last_interrupt_time = time.time()
         print("[打断] 已发出中断信号，状态已重置")
-    
+
     def _interrupt_openclaw_silent(self):
         """静默中断：仅取消请求和重置状态，不发送 /stop 命令
         用于 exit_standby 等已经明确要退出的场景，避免重复发送 /stop
@@ -1369,7 +1406,8 @@ class VoiceAssistant:
                 subprocess.Popen(
                     ["cmd", "/c", "start", "/b", str(script_path)],
                     cwd=str(project_dir),
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.DETACHED_PROCESS,
                 )
             else:
                 # macOS/Linux 上执行 sh 脚本
@@ -1449,7 +1487,9 @@ def get_args():
     # SenseVoice 模型参数（离线识别）
     _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _sense_voice_model_dir = os.path.join(
-        _project_dir, "models", "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+        _project_dir,
+        "models",
+        "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
     )
     parser.add_argument(
         "--sense-voice-model",
@@ -1473,7 +1513,7 @@ def get_args():
         default="auto",
         help="语言：auto, zh, en, ko, ja, yue",
     )
-    
+
     # Qwen3-ASR 模型参数（离线识别）
     _qwen3_model_dir = os.path.join(
         _project_dir, "models", "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25"
@@ -1525,7 +1565,7 @@ def main():
 
     # 使用 global.txt 作为唤醒词文件（由 start.sh 脚本合并生成）
     args.keywords_file = os.path.join(_PROJECT_DIR, "keywords", "global.txt")
-    
+
     # 构建 keyword_to_assistant_id 映射（从所有 assistant 配置中读取）
     keyword_mapping = {}
     for assistant in all_assistants:
@@ -1543,7 +1583,7 @@ def main():
                             keyword_text = line.split("@")[-1].strip()
                             keyword_mapping[keyword_text] = assistant_id
                 print(f"[配置] 加载 {assistant['name']} ({assistant_id}) 的唤醒词映射")
-    
+
     print(f"[配置] 使用唤醒词文件: {args.keywords_file}")
     print(f"[配置] 唤醒词映射: {keyword_mapping}")
 
@@ -1567,7 +1607,7 @@ def main():
     api_thread.start()
     print(f"API server started on port {API_PORT}")
 
-    with open(PID_FILE, "w") as f:
+    with open(PID_FILE, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 
     try:

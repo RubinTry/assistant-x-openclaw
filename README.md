@@ -105,8 +105,10 @@ venv/bin/pip install --force-reinstall --no-cache -r requirements.txt
 
 ```cmd
 python -m venv venv
-.\venv\Scripts\pip.exe install --force-reinstall --no-cache -r requirements.txt
+.\venv\Scripts\activate
+pip install --force-reinstall --no-cache -r requirements.txt
 ```
+
 
 ### 3. 配置环境变量
 
@@ -168,15 +170,18 @@ rm sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
 # 3. VAD 静音检测模型
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx
 mv silero_vad_v5.onnx silero_vad.onnx
+
+# 4. SenseVoice 多语言识别模型
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
 ```
 
 **可选模型（根据需求下载）：**
 
 ```bash
-# SenseVoice 多语言识别模型（推荐，识别更准确）
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
-tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
-rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
+# Jarvis TTS 模型（贾维斯英文语音合成）
+git clone https://huggingface.co/jgkawell/jarvis models/jarvis
 
 # Qwen3-ASR 离线识别模型
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
@@ -507,6 +512,12 @@ curl -X POST http://127.0.0.1:18790/exit
 1. 检查 TTS 模型是否正确下载到 `models/` 目录
 2. 确认音效文件存在于 `data/voices/`
 3. 查看控制台错误信息，确认模型路径正确
+4. 如果报 `No module named 'piper'`，请确认安装的是 `piper-tts` 而非 `piper`：
+   ```bash
+   pip uninstall piper -y       # 卸载错误包（pypiper）
+   pip install piper-tts        # 安装正确的 Piper TTS 包
+   ```
+   > `piper` 是一个无关的管道工具包（pypiper），正确的 TTS 包名是 `piper-tts`
 
 ### Q: 如何切换 TTS 引擎？
 
@@ -515,6 +526,8 @@ curl -X POST http://127.0.0.1:18790/exit
 ### Q: 支持 Windows 吗？
 
 是的，项目支持 Windows 平台。使用 `scripts\start.bat` 启动，部分功能（如 HUD 窗口）可能需要调整。
+
+> **Windows 音频说明**：Windows 下使用 `sounddevice` + `soundfile` 进行音频播放（与 macOS 的 `afplay` 方案不同），无需额外安装 `pygame`。
 
 ---
 
