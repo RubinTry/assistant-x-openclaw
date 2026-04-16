@@ -181,14 +181,14 @@ mv silero_vad_v5.onnx silero_vad.onnx
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
 tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
 rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+
+# 5. Jarvis TTS 模型（贾维斯英文语音合成，内置角色必需）
+git clone https://huggingface.co/jgkawell/jarvis jarvis
 ```
 
 **可选模型（根据需求下载）：**
 
 ```bash
-# Jarvis TTS 模型（贾维斯英文语音合成）
-git clone https://huggingface.co/jgkawell/jarvis models/jarvis
-
 # Qwen3-ASR 离线识别模型
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
 tar xf sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
