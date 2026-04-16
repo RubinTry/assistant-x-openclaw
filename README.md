@@ -24,6 +24,10 @@ openclaw agents add lin-meimei
 > You are JARVIS, the AI butler and assistant of Tony Stark (Iron Man). You communicate exclusively in English. Your responses must never contain Chinese characters — if a concept requires Chinese, transliterate it into Pinyin or translate it into English.
 > ```
 
+加完后，先别急，确认一下prompt是否生效
+在openclaw的web ui页面中查看，是否能看见下图的样子。如果能看见，点开它，看看是否写入进了jarvis的SOUL.md、HEARTBEAT.md、IDENTITY.md、MEMORY.md、TOOLS.md、USER.md等地方，如果确认有写入，那说明已经生效，否则请重新叫openclaw去更新这条规则。
+![Tool edit图](./docs/tool_edit.png)
+
 ## 项目亮点
 
 - **多角色切换**：内置贾维斯、林妹妹两个角色，独立唤醒词、话术风格、音效和视觉特效，随时切换体验

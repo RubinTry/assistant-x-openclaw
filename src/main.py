@@ -235,9 +235,9 @@ class VoiceAssistant:
         self.last_voice_time = time.time()
         self.idle_timeout = 30
         self.last_activity_time = time.time()
-        self._last_tts_check = False
 
         self._is_openclaw_busy = False
+        self._is_processing = False  # True: 从指令发出到TTS播报完毕的全流程
         self._openclaw_request_active = threading.Event()
         self._stop_openclaw_request = threading.Event()
         self._ignore_next_result = False
@@ -660,9 +660,9 @@ class VoiceAssistant:
         """音频回调函数"""
         if status:
             print(status)
-        if not is_tts_playing():
-            if self.audio_queue.qsize() < 100:
-                self.audio_queue.put(indata.copy())
+        # 始终入队音频，保证处理期间（含TTS播报）也能检测唤醒词打断
+        if self.audio_queue.qsize() < 100:
+            self.audio_queue.put(indata.copy())
 
     def _clear_queue(self):
         """清空音频队列"""
@@ -773,29 +773,30 @@ class VoiceAssistant:
                     print("[重置] 已完成，继续等待唤醒词...")
                     continue
 
-                if is_tts_playing():
+                # 处理中（OpenClaw请求→TTS播报完毕），只检测唤醒词以支持打断
+                if self._is_processing:
                     try:
                         audio_data = self.audio_queue.get(timeout=0.5)
                     except queue.Empty:
-                        time.sleep(0.1)
                         continue
 
                     samples = audio_data.reshape(-1)
-
                     keyword_stream.accept_waveform(self.sample_rate, samples)
 
                     while self.keyword_spotter.is_ready(keyword_stream):
                         self.keyword_spotter.decode_stream(keyword_stream)
                         kw_result = self.keyword_spotter.get_result(keyword_stream)
                         if kw_result:
-                            # 只有当前assistant的唤醒词才能打断
                             detected_id = self._detect_assistant_from_keyword(kw_result)
                             if detected_id != self.current_cfg["id"]:
                                 continue
                             print(f"\n[打断] 检测到唤醒词: {kw_result}")
+                            # 打断整个处理流程：停止TTS + 中断OpenClaw
                             stop_tts()
                             self._interrupt_openclaw()
-                            self._ignore_next_result = True
+                            # 重置识别器，准备接收新指令
+                            recognition_stream = self.recognizer.create_stream()
+                            recognition_result = ""
                             self.keyword_spotter.reset_stream(keyword_stream)
                             keyword_stream = self.keyword_spotter.create_stream()
                             print("\n请说出指令...")
@@ -804,16 +805,8 @@ class VoiceAssistant:
                     self._clear_queue()
                     continue
 
-                if self._last_tts_check and not is_tts_playing():
-                    self._clear_queue()
-                    self._last_tts_check = False
-                    time.sleep(0.1)
-                    continue
-
                 if audio_stream is None:
                     start_audio_stream()
-
-                self._last_tts_check = is_tts_playing()
 
                 try:
                     audio_data = self.audio_queue.get(timeout=0.5)
@@ -914,65 +907,11 @@ class VoiceAssistant:
                                 self._clear_queue()
                             continue
                     else:
-                        if self._is_openclaw_busy:
-                            kw_result = None
-                            keyword_stream.accept_waveform(self.sample_rate, samples)
-
-                            while self.keyword_spotter.is_ready(keyword_stream):
-                                self.keyword_spotter.decode_stream(keyword_stream)
-                                kw_result = self.keyword_spotter.get_result(
-                                    keyword_stream
-                                )
-                                if kw_result:
-                                    print(f"\n[打断] 检测到唤醒词: {kw_result}")
-                                    self._interrupt_openclaw()
-                                    self._ignore_next_result = True
-                                    time.sleep(0.1)
-                                    self._clear_queue()
-                                    self.keyword_spotter.reset_stream(keyword_stream)
-                                    keyword_stream = (
-                                        self.keyword_spotter.create_stream()
-                                    )
-                                    recognition_stream = self.recognizer.create_stream()
-                                    recognition_result = ""
-                                    print("\n请说出指令...")
-                                    break
                         if not self.is_awake:
                             continue
 
                 else:
-                    # 已进入唤醒状态，需要持续检测唤醒词以支持打断
-                    if self._is_openclaw_busy:
-                        # OpenClaw 正在处理，检测唤醒词来打断
-                        keyword_stream.accept_waveform(self.sample_rate, samples)
-
-                        while self.keyword_spotter.is_ready(keyword_stream):
-                            self.keyword_spotter.decode_stream(keyword_stream)
-                            kw_result = self.keyword_spotter.get_result(keyword_stream)
-                            if kw_result:
-                                # 只有当前assistant的唤醒词才能打断
-                                detected_id = self._detect_assistant_from_keyword(
-                                    kw_result
-                                )
-                                if detected_id != self.current_cfg["id"]:
-                                    continue
-                                print(f"\n[打断] 检测到唤醒词: {kw_result}")
-                                # 打断当前请求
-                                self._interrupt_openclaw()
-                                self._ignore_next_result = True
-
-                                time.sleep(0.1)
-                                self._clear_queue()
-                                self.keyword_spotter.reset_stream(keyword_stream)
-                                keyword_stream = self.keyword_spotter.create_stream()
-                                recognition_stream = self.recognizer.create_stream()
-                                recognition_result = ""
-                                print("\n请说出指令...")
-                                break
-                        # 打断后继续循环，不再处理识别
-                        continue
-
-                    # OpenClaw 空闲，正常处理语音识别
+                    # 已唤醒且不在处理中，正常处理语音识别
                     if recognition_stream is None:
                         recognition_stream = self.recognizer.create_stream()
                     recognition_stream.accept_waveform(self.sample_rate, samples)
@@ -1180,6 +1119,7 @@ class VoiceAssistant:
         self._stop_openclaw_request.set()
         # 立即重置状态，确保可以重新唤醒
         self._is_openclaw_busy = False
+        self._is_processing = False
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         # 停止 TTS 播放
@@ -1195,6 +1135,7 @@ class VoiceAssistant:
         self.openclaw.cancel_current_request()
         self._stop_openclaw_request.set()
         self._is_openclaw_busy = False
+        self._is_processing = False
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         stop_tts()
@@ -1210,120 +1151,128 @@ class VoiceAssistant:
 
         print("◈ 正在思考...", end="", flush=True)
 
+        self._is_processing = True  # 标记全流程：指令发出→OpenClaw回复→TTS播报完毕
         self._is_openclaw_busy = True
         self._stop_openclaw_request.clear()
         self._openclaw_request_active.set()
 
-        import threading
-        import queue
+        try:
+            import threading
+            import queue
 
-        result_queue = queue.Queue()
+            result_queue = queue.Queue()
 
-        def _openclaw_request():
-            self._waiting_active = threading.Event()
-            self._waiting_active.set()
+            def _openclaw_request():
+                self._waiting_active = threading.Event()
+                self._waiting_active.set()
 
-            def _waiting_sound_loop():
-                while self._waiting_active.is_set():
-                    self.jarvis.play_sound("waiting")
-                    for _ in range(10):
-                        if not self._waiting_active.is_set():
-                            return
-                        time.sleep(0.3)
+                def _waiting_sound_loop():
+                    while self._waiting_active.is_set():
+                        self.jarvis.play_sound("waiting")
+                        for _ in range(10):
+                            if not self._waiting_active.is_set():
+                                return
+                            time.sleep(0.3)
 
-            waiting_thread = threading.Thread(target=_waiting_sound_loop, daemon=True)
-            waiting_thread.start()
-
-            received_chunks = []
-            stop_requested = threading.Event()
-
-            def _on_stream_start():
-                if self._stop_openclaw_request.is_set():
-                    stop_requested.set()
-                    return
-                self._waiting_active.clear()
-                time.sleep(0.05)
-                print("\n[← OpenClaw] ", end="", flush=True)
-
-            def _on_stream_chunk(chunk):
-                if self._stop_openclaw_request.is_set():
-                    stop_requested.set()
-                    return
-                received_chunks.append(chunk)
-                full_text = "".join(received_chunks)
-                print(chunk, end="", flush=True)
-                self.visual.show_ai_text(full_text)
-
-            def _on_stream_end():
-                if not stop_requested.is_set():
-                    self._waiting_active.clear()
-
-            try:
-                reply = self.openclaw.send_and_wait_stream(
-                    text,
-                    on_chunk=_on_stream_chunk,
-                    on_start=_on_stream_start,
-                    on_end=_on_stream_end,
+                waiting_thread = threading.Thread(
+                    target=_waiting_sound_loop, daemon=True
                 )
-                self._waiting_active.clear()
-                waiting_thread.join(timeout=0.5)
-                result_queue.put(("success", reply))
-            except Exception as e:
-                self._waiting_active.clear()
-                result_queue.put(("error", str(e)))
-            finally:
-                # 确保无论发生什么都会重置状态
-                self._is_openclaw_busy = False
-                self._openclaw_request_active.clear()
+                waiting_thread.start()
 
-        request_thread = threading.Thread(target=_openclaw_request, daemon=True)
-        request_thread.start()
+                received_chunks = []
+                stop_requested = threading.Event()
 
-        while True:
-            try:
-                status, data = result_queue.get(timeout=0.5)
-                break
-            except queue.Empty:
-                if self._stop_openclaw_request.is_set():
-                    # 只在第一次检测到打断时发送 stop 命令
-                    self.openclaw.send_stop_command()
-                    self.openclaw.cancel_current_request()
-                    print("\n[打断] OpenClaw 请求已中断")
+                def _on_stream_start():
+                    if self._stop_openclaw_request.is_set():
+                        stop_requested.set()
+                        return
+                    self._waiting_active.clear()
+                    time.sleep(0.05)
+                    print("\n[← OpenClaw] ", end="", flush=True)
+
+                def _on_stream_chunk(chunk):
+                    if self._stop_openclaw_request.is_set():
+                        stop_requested.set()
+                        return
+                    received_chunks.append(chunk)
+                    full_text = "".join(received_chunks)
+                    print(chunk, end="", flush=True)
+                    self.visual.show_ai_text(full_text)
+
+                def _on_stream_end():
+                    if not stop_requested.is_set():
+                        self._waiting_active.clear()
+
+                try:
+                    reply = self.openclaw.send_and_wait_stream(
+                        text,
+                        on_chunk=_on_stream_chunk,
+                        on_start=_on_stream_start,
+                        on_end=_on_stream_end,
+                    )
+                    self._waiting_active.clear()
+                    waiting_thread.join(timeout=0.5)
+                    result_queue.put(("success", reply))
+                except Exception as e:
+                    self._waiting_active.clear()
+                    result_queue.put(("error", str(e)))
+                finally:
                     self._is_openclaw_busy = False
+                    self._openclaw_request_active.clear()
+
+            request_thread = threading.Thread(target=_openclaw_request, daemon=True)
+            request_thread.start()
+
+            while True:
+                try:
+                    status, data = result_queue.get(timeout=0.5)
+                    break
+                except queue.Empty:
+                    if self._stop_openclaw_request.is_set():
+                        self.openclaw.send_stop_command()
+                        self.openclaw.cancel_current_request()
+                        print("\n[打断] OpenClaw 请求已中断")
+                        return
+
+            if status == "success":
+                reply = data
+                if reply:
+                    print()
+                    # 整体合成播放
+                    cleaned = _clean_for_tts(reply)
+                    if cleaned:
+                        from tts import _tts_playing
+
+                        _tts_playing.set()
+                        try:
+                            result = self.tts.synthesize_to_array(cleaned)
+                            if result and not self._stop_openclaw_request.is_set():
+                                import sounddevice as sd
+
+                                audio_data, sample_rate = result
+                                sd.play(audio_data * 1.5, samplerate=sample_rate)
+                                sd.wait()
+                        finally:
+                            _tts_playing.clear()
+
+                        # TTS播报结束，检查是否被中断
+                        if self._stop_openclaw_request.is_set():
+                            print("\n[打断] TTS播报被中断，跳过收尾音效")
+                            return
+
+                    print("◈ 继续说吧，我在听着...", flush=True)
+                    self.jarvis.play_sound("continue")
                     return
-
-        if status == "success":
-            reply = data
-            if reply:
-                print()
-                # 整体合成播放
-                cleaned = _clean_for_tts(reply)
-                if cleaned:
-                    from tts import _tts_playing
-
-                    _tts_playing.set()
-                    try:
-                        result = self.tts.synthesize_to_array(cleaned)
-                        if result and not self._stop_openclaw_request.is_set():
-                            import sounddevice as sd
-
-                            audio_data, sample_rate = result
-                            sd.play(audio_data * 1.5, samplerate=sample_rate)
-                            sd.wait()
-                    finally:
-                        _tts_playing.clear()
-                print("◈ 继续说吧，我在听着...", flush=True)
-                self.jarvis.play_sound("continue")
-                self._is_openclaw_busy = False
-                return
+                else:
+                    print("\n[← OpenClaw] (无回复)")
+                    self.jarvis.on_error("无回复")
             else:
-                print("\n[← OpenClaw] (无回复)")
-                self.jarvis.on_error("无回复")
-        else:
-            print(f"[OpenClaw] 异常: {data}")
-            self.jarvis.on_error(data)
-
-        self._is_openclaw_busy = False
+                print(f"[OpenClaw] 异常: {data}")
+                self.jarvis.on_error(data)
+        finally:
+            # 无论正常完成还是被中断，都确保 _is_processing 复位
+            self._is_processing = False
+            self._is_openclaw_busy = False
 
     def run(self):
         """运行语音助手"""
