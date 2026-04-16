@@ -39,13 +39,11 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - assets/hongyue/
 
   shaders:
     - shaders/metaballs_shader.frag
     - shaders/orb_shader.frag
-    - shaders/siri_loader.frag
+#    - shaders/siri_loader.frag
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
