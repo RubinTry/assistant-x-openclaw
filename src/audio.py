@@ -12,15 +12,15 @@ def play_audio_file(file_path: str, volume: float = 0.5, blocking: bool = False)
         return False
     try:
         if _is_windows:
-            import pygame
+            import soundfile as sf
+            import sounddevice as sd
 
-            pygame.mixer.init()
-            sound = pygame.mixer.Sound(file_path)
-            sound.set_volume(volume)
+            data, sr = sf.read(file_path, dtype="float32")
+            if data.ndim > 1:
+                data = data[:, 0]
+            sd.play(data * volume, samplerate=sr)
             if blocking:
-                sound.play()
-            else:
-                sound.play()
+                sd.wait()
         elif _is_macos:
             cmd = ["afplay", "-v", str(volume), file_path]
             if blocking:
@@ -44,9 +44,9 @@ def play_audio_file(file_path: str, volume: float = 0.5, blocking: bool = False)
 def stop_audio():
     try:
         if _is_windows:
-            import pygame
+            import sounddevice as sd
 
-            pygame.mixer.stop()
+            sd.stop()
         elif _is_macos:
             subprocess.run(["pkill", "-f", "afplay"], capture_output=True)
         else:

@@ -18,6 +18,12 @@ openclaw agents add lin-meimei
 # 智能体相关配置文档： https://docs.openclaw.ai/zh-CN/concepts/multi-agent
 ```
 
+> 💡 **强烈建议**：为贾维斯智能体设置以下 System Prompt，确保回复始终为英文，避免中文混入导致 Piper 英文 TTS 朗读异常：
+>
+> ```
+> You are JARVIS, the AI butler and assistant of Tony Stark (Iron Man). You communicate exclusively in English. Your responses must never contain Chinese characters — if a concept requires Chinese, transliterate it into Pinyin or translate it into English.
+> ```
+
 ## 项目亮点
 
 - **多角色切换**：内置贾维斯、林妹妹两个角色，独立唤醒词、话术风格、音效和视觉特效，随时切换体验
@@ -105,8 +111,10 @@ venv/bin/pip install --force-reinstall --no-cache -r requirements.txt
 
 ```cmd
 python -m venv venv
-.\venv\Scripts\pip.exe install --force-reinstall --no-cache -r requirements.txt
+.\venv\Scripts\activate
+pip install --force-reinstall --no-cache -r requirements.txt
 ```
+
 
 ### 3. 配置环境变量
 
@@ -178,6 +186,8 @@ rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
 **可选模型（根据需求下载）：**
 
 ```bash
+# Jarvis TTS 模型（贾维斯英文语音合成）
+git clone https://huggingface.co/jgkawell/jarvis models/jarvis
 
 # Qwen3-ASR 离线识别模型
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
@@ -508,6 +518,12 @@ curl -X POST http://127.0.0.1:18790/exit
 1. 检查 TTS 模型是否正确下载到 `models/` 目录
 2. 确认音效文件存在于 `data/voices/`
 3. 查看控制台错误信息，确认模型路径正确
+4. 如果报 `No module named 'piper'`，请确认安装的是 `piper-tts` 而非 `piper`：
+   ```bash
+   pip uninstall piper -y       # 卸载错误包（pypiper）
+   pip install piper-tts        # 安装正确的 Piper TTS 包
+   ```
+   > `piper` 是一个无关的管道工具包（pypiper），正确的 TTS 包名是 `piper-tts`
 
 ### Q: 如何切换 TTS 引擎？
 
@@ -516,6 +532,8 @@ curl -X POST http://127.0.0.1:18790/exit
 ### Q: 支持 Windows 吗？
 
 是的，项目支持 Windows 平台。使用 `scripts\start.bat` 启动，部分功能（如 HUD 窗口）可能需要调整。
+
+> **Windows 音频说明**：Windows 下使用 `sounddevice` + `soundfile` 进行音频播放（与 macOS 的 `afplay` 方案不同），无需额外安装 `pygame`。
 
 ---
 

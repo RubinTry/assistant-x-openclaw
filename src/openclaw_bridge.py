@@ -36,7 +36,7 @@ def _load_token():
 
     config_path = os.path.expanduser("~/.openclaw/openclaw.json")
     try:
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
             token = config.get("gateway", {}).get("auth", {}).get("token")
             if token:

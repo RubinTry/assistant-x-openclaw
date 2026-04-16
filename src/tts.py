@@ -20,7 +20,7 @@ from assistants.tts import AssistantTTS, NullAssistantTTS
 
 _env_file = Path(__file__).parent.parent / ".env"
 if _env_file.exists():
-    for line in _env_file.read_text().splitlines():
+    for line in _env_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
@@ -51,6 +51,7 @@ def stop_tts():
     audio.stop_audio()
     try:
         import sounddevice as sd
+
         sd.stop()
     except Exception:
         pass

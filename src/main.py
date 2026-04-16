@@ -1601,7 +1601,7 @@ def main():
     api_thread.start()
     print(f"API server started on port {API_PORT}")
 
-    with open(PID_FILE, "w") as f:
+    with open(PID_FILE, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 
     try:
