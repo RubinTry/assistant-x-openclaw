@@ -18,6 +18,12 @@ openclaw agents add lin-meimei
 # 智能体相关配置文档： https://docs.openclaw.ai/zh-CN/concepts/multi-agent
 ```
 
+> 💡 **强烈建议**：为贾维斯智能体设置以下 System Prompt，确保回复始终为英文，避免中文混入导致 Piper 英文 TTS 朗读异常：
+>
+> ```
+> You are JARVIS, the AI butler and assistant of Tony Stark (Iron Man). You communicate exclusively in English. Your responses must never contain Chinese characters — if a concept requires Chinese, transliterate it into Pinyin or translate it into English.
+> ```
+
 ## 项目亮点
 
 - **多角色切换**：内置贾维斯、林妹妹两个角色，独立唤醒词、话术风格、音效和视觉特效，随时切换体验
