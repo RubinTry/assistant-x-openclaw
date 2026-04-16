@@ -164,45 +164,22 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 
 **必需模型：**
 
-```bash
-cd models/
+点击下方链接下载，将文件放入 `models/` 目录，`.tar.bz2` 文件需解压（Windows 可用 7-Zip，macOS/Linux 用 `tar xf`）：
 
-# 1. KWS 唤醒模型
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
-tar xf sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
-rm sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
-
-# 2. ASR 语音识别模型
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
-tar xf sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
-rm sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
-
-# 3. VAD 静音检测模型
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx
-mv silero_vad_v5.onnx silero_vad.onnx
-
-# 4. SenseVoice 多语言识别模型
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
-tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
-rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
-
-# 5. Jarvis TTS 模型（贾维斯英文语音合成，内置角色必需）
-git clone https://huggingface.co/jgkawell/jarvis jarvis
-```
+| # | 模型 | 下载链接 |
+|---|------|----------|
+| 1 | KWS 唤醒模型 | [sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2) |
+| 2 | ASR 语音识别模型 | [sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2) |
+| 3 | VAD 静音检测模型 | [silero_vad_v5.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx)（下载后重命名为 `silero_vad.onnx`） |
+| 4 | SenseVoice 多语言识别模型 | [sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2) |
+| 5 | Jarvis TTS 模型（贾维斯英文语音合成，内置角色必需） | 在models目录执行这条命令：git clone https://huggingface.co/jgkawell/jarvis |
 
 **可选模型（根据需求下载）：**
 
-```bash
-# Qwen3-ASR 离线识别模型
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
-tar xf sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
-rm sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
-
-# ZipVoice TTS 模型（零样本声音克隆）
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
-tar xf sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
-rm sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2
-```
+| # | 模型 | 下载链接 |
+|---|------|----------|
+| 6 | Qwen3-ASR 离线识别模型 | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
+| 7 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
 
 ### 5. 准备音效文件
 
