@@ -4,6 +4,20 @@
 
 多角色 AI 语音助手，基于 sherpa-onnx 本地运行，通过 OpenClaw Gateway 对接大模型。支持多角色切换、语音唤醒、连续对话、TTS 播报和 HUD 视觉特效。语音识别和合成都跑在本地，LLM 走网关，隐私有保障。
 
+## 开发进度
+
+- ✅ KWS 多角色唤醒(一次只能唤醒一个)
+- ✅ ASR 流式/离线语音识别（SenseVoice / Zipformer）
+- ✅ TTS 语音合成（Piper / VITS / MeloTTS）
+- ✅ 多角色切换（贾维斯 / 林妹妹）
+- ✅ 连续对话与打断机制
+- ✅ HUD 视觉特效（Flutter 透明窗口）
+- ✅ OpenClaw Gateway 对接大模型
+- ✅ 热词优化
+- ✅ API 远程退出
+- 自定义角色（实验性阶段）
+- 声纹识别（开发中）
+
 ## 前置说明
 
 每个 assistant 角色对应一个 OpenClaw Agent。在 `assistants.json` 中配置角色时，需要把 `id` 字段设为你事先在 OpenClaw 中创建好的 Agent ID。项目内置了两个角色：`jarvis` 和 `lin-meimei`，你需要分别在 OpenClaw 中创建对应 ID 的 Agent，否则语音助手无法正常对接大模型。
