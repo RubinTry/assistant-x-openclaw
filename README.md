@@ -168,15 +168,16 @@ rm sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
 # 3. VAD 静音检测模型
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx
 mv silero_vad_v5.onnx silero_vad.onnx
+
+# 4. SenseVoice 多语言识别模型
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
 ```
 
 **可选模型（根据需求下载）：**
 
 ```bash
-# SenseVoice 多语言识别模型（推荐，识别更准确）
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
-tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
-rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
 
 # Qwen3-ASR 离线识别模型
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2

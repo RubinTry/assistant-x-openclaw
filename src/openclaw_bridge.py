@@ -96,7 +96,7 @@ class OpenClawBridge:
             logger.error("Gateway token 不可用")
             return False
         # 防止重复发送：如果已经有线程在发送，跳过
-        if hasattr(self, '_stop_sending') and self._stop_sending:
+        if hasattr(self, "_stop_sending") and self._stop_sending:
             logger.info("/stop 已在发送中，跳过")
             return True
         self._stop_sending = True
@@ -125,7 +125,9 @@ class OpenClawBridge:
             else:
                 logger.warning(f"发送 /stop 失败: HTTP {resp.status_code}")
         except requests.exceptions.Timeout:
-            logger.warning("发送 /stop 命令超时 (8s)，Gateway 可能正在处理中，但会继续执行本地中断")
+            logger.warning(
+                "发送 /stop 命令超时 (8s)，Gateway 可能正在处理中，但会继续执行本地中断"
+            )
             # 超时不意味着失败，Gateway 可能仍在处理，本地状态仍需重置
         except requests.exceptions.ConnectionError:
             logger.warning("无法连接到 Gateway，连接被拒绝或网关未启动")
