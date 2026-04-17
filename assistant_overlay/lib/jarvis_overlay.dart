@@ -1,9 +1,110 @@
 import 'dart:math' as math;
-import 'dart:async';
-import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:assistant_overlay/jarvis_rings_windows.dart';
 import 'agent_visual.dart';
+
+class _JarvisShaderPainter extends CustomPainter {
+  final FragmentProgram program;
+  final double outerRingRotation;
+  final double arcsRotation;
+  final double dataRingRotation;
+  final double innerRingRotation;
+  final double pulseValue;
+  final double speakingScale;
+  final double effectState;
+
+  _JarvisShaderPainter({
+    required this.program,
+    required this.outerRingRotation,
+    required this.arcsRotation,
+    required this.dataRingRotation,
+    required this.innerRingRotation,
+    required this.pulseValue,
+    required this.speakingScale,
+    required this.effectState,
+  });
+
+  @override
+  void paint(Canvas canvas, Size canvasSize) {
+    if (canvasSize.width <= 0 || canvasSize.height <= 0) return;
+
+    final shader = program.fragmentShader();
+    shader.setFloat(0, outerRingRotation);
+    shader.setFloat(1, canvasSize.width);
+    shader.setFloat(2, canvasSize.height);
+    shader.setFloat(3, arcsRotation);
+    shader.setFloat(4, dataRingRotation);
+    shader.setFloat(5, innerRingRotation);
+    shader.setFloat(6, pulseValue);
+    shader.setFloat(7, speakingScale);
+    shader.setFloat(8, effectState);
+
+    final paint = Paint()
+      ..shader = shader
+      ..blendMode = BlendMode.srcOver;
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_JarvisShaderPainter oldDelegate) {
+    return true;
+  }
+}
+
+class _JarvisTextPainter extends CustomPainter {
+  final String currentEffect;
+
+  _JarvisTextPainter({required this.currentEffect});
+
+  Color get primaryColor {
+    switch (currentEffect) {
+      case 'success':
+        return const Color(0xFF2A9999);
+      case 'error':
+        return const Color(0xFFFF4444);
+      default:
+        return const Color(0xFF3A9F9F);
+    }
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: "J.A.R.V.I.S.",
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 2,
+          shadows: [
+            Shadow(color: primaryColor, blurRadius: 10),
+            Shadow(color: primaryColor.withAlpha(150), blurRadius: 20),
+          ],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    );
+    textPainter.layout(minWidth: 0, maxWidth: 150);
+    textPainter.paint(
+      canvas,
+      Offset(
+        center.dx - textPainter.width / 2,
+        center.dy - textPainter.height / 2,
+      ),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_JarvisTextPainter oldDelegate) {
+    return currentEffect != oldDelegate.currentEffect;
+  }
+}
 
 class JarvisRingsPainter extends CustomPainter {
   final double outerRingRotation;
@@ -391,6 +492,13 @@ class JarvisRingsPainter extends CustomPainter {
 class JarvisAgentVisual implements AgentVisual {
   final TickerProvider vsync;
 
+  static Future<FragmentProgram>? _shaderFuture;
+
+  static Future<FragmentProgram> _ensureShaderLoaded() {
+    _shaderFuture ??= FragmentProgram.fromAsset('shaders/jarvis.frag');
+    return _shaderFuture!;
+  }
+
   JarvisAgentVisual({required this.vsync}) {
     _userScrollController = ScrollController();
     _aiScrollController = ScrollController();
@@ -441,18 +549,22 @@ class JarvisAgentVisual implements AgentVisual {
   late AnimationController _leftTerminalSlideController;
   late AnimationController _rightTerminalSlideController;
 
-  static const Color _jarvisBlue = Color(0xFF66FFFF);
-  static const Color _terminalBackground = Color(0xCC0A1628);
+  static const Color _jarvisBlue = Color(0xFF99FFFF);
+  static const Color _terminalBackground = Color(0xCC00D9FF);
 
   void _initAnimationControllers() {
     _outerRingController = AnimationController(
       vsync: vsync,
-      duration: const Duration(seconds: 500),
+      duration: const Duration(
+        seconds: 10,
+      ), // DEBUG: was 500, now 10 for visible rotation
     )..addListener(_updateOuterRingAngle);
 
     _arcsController = AnimationController(
       vsync: vsync,
-      duration: const Duration(seconds: 500),
+      duration: const Duration(
+        seconds: 10,
+      ), // DEBUG: was 500, now 10 for visible rotation
     )..addListener(_updateArcsAngle);
 
     _dataRingController = AnimationController(
@@ -797,6 +909,17 @@ class JarvisAgentVisual implements AgentVisual {
   ) {
     final size = 300.0;
 
+    double effectStateIndex() {
+      switch (_currentEffect) {
+        case 'success':
+          return 1.0;
+        case 'error':
+          return 2.0;
+        default:
+          return 0.0;
+      }
+    }
+
     return Center(
       child: AnimatedBuilder(
         animation: _ringOpacityController,
@@ -814,52 +937,44 @@ class JarvisAgentVisual implements AgentVisual {
                       return SizedBox(
                         width: size,
                         height: size,
-                        child: CustomPaint(
-                          painter: Platform.isWindows
-                              ? JarvisRingsPainterWindows(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
+                        child: Stack(
+                          children: [
+                            FutureBuilder<FragmentProgram>(
+                              future: _ensureShaderLoaded(),
+                              builder: (context, snapshot) {
+                                if (!snapshot.hasData) {
+                                  return const SizedBox();
+                                }
+                                return CustomPaint(
+                                  size: Size(size, size),
+                                  painter: _JarvisShaderPainter(
+                                    program: snapshot.data!,
+                                    outerRingRotation:
+                                        _outerRingAngle * 2 * math.pi,
+                                    arcsRotation: _arcsAngle * 2 * math.pi,
+                                    dataRingRotation:
+                                        _dataRingAngle * 2 * math.pi,
+                                    innerRingRotation:
+                                        _innerRingAngle * 2 * math.pi,
+                                    pulseValue: _pulseController.value,
+                                    speakingScale:
+                                        (_ringScaleController.value - 1.0)
+                                            .clamp(0.0, 0.1) *
+                                        10,
+                                    effectState: effectStateIndex(),
+                                  ),
+                                );
+                              },
+                            ),
+                            Center(
+                              child: CustomPaint(
+                                size: Size(size, size),
+                                painter: _JarvisTextPainter(
                                   currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
-                                )
-                              : JarvisRingsPainter(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
-                                  currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
                                 ),
+                              ),
+                            ),
+                          ],
                         ),
                       );
                     },

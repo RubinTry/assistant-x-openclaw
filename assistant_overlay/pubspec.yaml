@@ -43,6 +43,7 @@ flutter:
   shaders:
     - shaders/metaballs_shader.frag
     - shaders/orb_shader.frag
+    - shaders/jarvis.frag
 #    - shaders/siri_loader.frag
 
   # An image asset can refer to one or more resolution-specific "variants", see
