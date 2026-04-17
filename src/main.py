@@ -969,13 +969,11 @@ class VoiceAssistant:
                     idle_duration = current_time - self.last_activity_time
 
                     if self.continuous_mode and silence_duration > self.idle_timeout:
-                        print(f"\n连续对话超时（{self.idle_timeout}秒无活动），已退出")
-                        self.continuous_mode = False
-                        self.visual.hide_effects()
-                        self.visual.clear_texts()
-                        self.is_awake = False
+                        print(
+                            f"\n连续对话超时（{self.idle_timeout}秒无活动），自动退出"
+                        )
+                        self.exit_standby()
                         recognition_result = ""
-                        print("\n请说出唤醒词来激活...")
                         self.keyword_spotter.reset_stream(keyword_stream)
                         keyword_stream = self.keyword_spotter.create_stream()
                         continue
