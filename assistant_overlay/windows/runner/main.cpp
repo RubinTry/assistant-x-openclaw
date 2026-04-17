@@ -7,14 +7,10 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
-  // Attach to console when present (e.g., 'flutter run') or create a
-  // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
   }
 
-  // Initialize COM, so that it is available for use in the library and/or
-  // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
@@ -29,9 +25,26 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   HMONITOR primary = ::MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY);
   MONITORINFO mi = {sizeof(mi)};
   ::GetMonitorInfo(primary, &mi);
+
+  UINT dpiX, dpiY;
+  HDC hdc = ::GetDC(nullptr);
+  if (hdc) {
+    dpiX = ::GetDeviceCaps(hdc, LOGPIXELSX);
+    dpiY = ::GetDeviceCaps(hdc, LOGPIXELSY);
+    ::ReleaseDC(nullptr, hdc);
+  } else {
+    dpiX = 96;
+    dpiY = 96;
+  }
+  double scaleFactor = dpiX / 96.0;
+
+  int physWidth = mi.rcMonitor.right - mi.rcMonitor.left;
+  int physHeight = mi.rcMonitor.bottom - mi.rcMonitor.top;
+  int logicalWidth = static_cast<int>(physWidth / scaleFactor);
+  int logicalHeight = static_cast<int>(physHeight / scaleFactor);
+
   Win32Window::Point origin(0, 0);
-  Win32Window::Size size(mi.rcMonitor.right - mi.rcMonitor.left,
-                         mi.rcMonitor.bottom - mi.rcMonitor.top);
+  Win32Window::Size size(logicalWidth, logicalHeight);
 
   if (!window.Create(L"assistant_overlay", origin, size)) {
     return EXIT_FAILURE;

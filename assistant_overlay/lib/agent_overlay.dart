@@ -56,7 +56,6 @@ class _AgentOverlayState extends State<AgentOverlay>
   void _handleCommand(String command) {
     print('[AgentOverlay] Received command: $command');
 
-
     if (command.startsWith('agent:')) {
       final agentName = command.substring(6).trim();
       print(
@@ -104,6 +103,7 @@ class _AgentOverlayState extends State<AgentOverlay>
 
     return IndexedStack(
       index: currentIndex,
+      sizing: StackFit.expand,
       children: agentList.map((entry) {
         final agent = entry.value;
         return Stack(

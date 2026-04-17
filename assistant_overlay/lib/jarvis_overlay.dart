@@ -27,11 +27,11 @@ class JarvisRingsPainter extends CustomPainter {
   Color get primaryColor {
     switch (currentEffect) {
       case 'success':
-        return const Color(0xFF2A9999);
+        return const Color(0xFF00FF66);
       case 'error':
         return const Color(0xFFFF4444);
       default:
-        return const Color(0xFF3A9F9F);
+        return const Color(0xFF5FFFFF);
     }
   }
 
@@ -442,17 +442,17 @@ class JarvisAgentVisual implements AgentVisual {
   late AnimationController _rightTerminalSlideController;
 
   static const Color _jarvisBlue = Color(0xFF66FFFF);
-  static const Color _terminalBackground = Color(0xCC0A1628);
+  static const Color _terminalBackground = Color(0xFF0CDDFF);
 
   void _initAnimationControllers() {
     _outerRingController = AnimationController(
       vsync: vsync,
-      duration: const Duration(seconds: 500),
+      duration: const Duration(seconds: 30),
     )..addListener(_updateOuterRingAngle);
 
     _arcsController = AnimationController(
       vsync: vsync,
-      duration: const Duration(seconds: 500),
+      duration: const Duration(seconds: 30),
     )..addListener(_updateArcsAngle);
 
     _dataRingController = AnimationController(
@@ -656,8 +656,7 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateOuterRingAngle() {
     final delta = _outerRingController.value - _lastOuterValue;
     _lastOuterValue = _outerRingController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _outerRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -668,8 +667,7 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateArcsAngle() {
     final delta = _arcsController.value - _lastArcsValue;
     _lastArcsValue = _arcsController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _arcsAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -680,8 +678,7 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateDataRingAngle() {
     final delta = _dataRingController.value - _lastDataRingValue;
     _lastDataRingValue = _dataRingController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _dataRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -692,8 +689,7 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateInnerRingAngle() {
     final delta = _innerRingController.value - _lastInnerRingValue;
     _lastInnerRingValue = _innerRingController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _innerRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -719,19 +715,19 @@ class JarvisAgentVisual implements AgentVisual {
 
   @override
   Widget buildAiTerminal(
-    BuildContext context,
-    double screenWidth,
-    double screenHeight,
-  ) {
+      BuildContext context,
+      double screenWidth,
+      double screenHeight,
+      ) {
     final double terminalHeight = screenHeight / 3;
 
     final leftSlide =
-        Tween<Offset>(begin: const Offset(-1.0, 0), end: Offset.zero).animate(
-          CurvedAnimation(
-            parent: _leftTerminalSlideController,
-            curve: Curves.easeOutCubic,
-          ),
-        );
+    Tween<Offset>(begin: const Offset(-1.0, 0), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _leftTerminalSlideController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
 
     return SlideTransition(
       position: leftSlide,
@@ -755,19 +751,19 @@ class JarvisAgentVisual implements AgentVisual {
 
   @override
   Widget buildUserTerminal(
-    BuildContext context,
-    double screenWidth,
-    double screenHeight,
-  ) {
+      BuildContext context,
+      double screenWidth,
+      double screenHeight,
+      ) {
     final double terminalHeight = screenHeight / 3;
 
     final rightSlide =
-        Tween<Offset>(begin: const Offset(1.0, 0), end: Offset.zero).animate(
-          CurvedAnimation(
-            parent: _rightTerminalSlideController,
-            curve: Curves.easeOutCubic,
-          ),
-        );
+    Tween<Offset>(begin: const Offset(1.0, 0), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _rightTerminalSlideController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
 
     return SlideTransition(
       position: rightSlide,
@@ -791,10 +787,10 @@ class JarvisAgentVisual implements AgentVisual {
 
   @override
   Widget buildEffects(
-    BuildContext context,
-    double screenWidth,
-    double screenHeight,
-  ) {
+      BuildContext context,
+      double screenWidth,
+      double screenHeight,
+      ) {
     final size = 300.0;
 
     return Center(
@@ -817,49 +813,41 @@ class JarvisAgentVisual implements AgentVisual {
                         child: CustomPaint(
                           painter: Platform.isWindows
                               ? JarvisRingsPainterWindows(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
-                                  currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
-                                )
+                            outerRingRotation:
+                            (_outerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            arcsRotation:
+                            (_arcsAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            dataRingRotation:
+                            (_dataRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            innerRingRotation:
+                            (_innerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            pulseValue: _pulseController.value,
+                            currentEffect: _currentEffect,
+                            speakingScale:
+                            (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
+                          )
                               : JarvisRingsPainter(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
-                                  currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
-                                ),
+                            outerRingRotation:
+                            (_outerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            arcsRotation:
+                            (_arcsAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            dataRingRotation:
+                            (_dataRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            innerRingRotation:
+                            (_innerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            pulseValue: _pulseController.value,
+                            currentEffect: _currentEffect,
+                            speakingScale:
+                            (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
+                          ),
                         ),
                       );
                     },
@@ -930,9 +918,9 @@ class JarvisAgentVisual implements AgentVisual {
       width: 350,
       constraints: BoxConstraints(maxHeight: maxHeight),
       decoration: BoxDecoration(
-        color: _terminalBackground,
+        color: _terminalBackground.withAlpha(100),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _jarvisBlue.withAlpha(200), width: 1),
+        border: Border.all(color: _jarvisBlue.withAlpha(150), width: 0),
       ),
       padding: const EdgeInsets.all(12),
       child: ListView(
