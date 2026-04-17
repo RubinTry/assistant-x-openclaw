@@ -86,7 +86,7 @@ class JarvisRingsPainter extends CustomPainter {
       ..color = primaryColorDim
       ..style = PaintingStyle.stroke
       ..strokeWidth = 6
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
     canvas.drawCircle(center, radius, ringPaint);
 
     final tickPaint = Paint()
@@ -115,7 +115,7 @@ class JarvisRingsPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4
       ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.outer, 12);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.outer, 6);
 
     for (int i = 0; i < 12; i++) {
       final angle = (i / 12) * 2 * math.pi + outerRingRotation;
