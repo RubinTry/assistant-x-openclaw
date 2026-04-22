@@ -255,6 +255,7 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 | 4 | SenseVoice 多语言识别模型 | [sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2) |
 | 5 | Jarvis TTS 模型（贾维斯英文语音合成，内置角色必需） | 在models目录执行这条命令：git clone https://huggingface.co/jgkawell/jarvis |
 | 6 | VITS MeloTTS 模型（林妹妹中英文语音合成，内置角色必需） | [vits-melo-tts-zh_en.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2) |
+| 7 | 声纹嵌入模型（声纹录入必需） | [3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx) |
 
 **可选模型（根据需求下载）：**
 
@@ -509,9 +510,9 @@ l i n m e i m e i z a i m a :3.0 #0.02 @林妹妹在吗
 
 ## 高级功能
 
-### 声纹录入（可选）
+### 声纹录入
 
-> **TODO**: 声纹识别和管理功能暂未完全实现，目前仅支持录入，验证和权限控制尚未完成。
+> **前提**：需下载声纹嵌入模型 `3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx` 放入 `models/` 目录（见上方模型表格第 7 项），否则录入会报错 `No graph was found in the protobuf`。
 
 用于验证说话人身份（未来可扩展声纹验证）：
 
@@ -519,7 +520,7 @@ l i n m e i m e i z a i m a :3.0 #0.02 @林妹妹在吗
 ./scripts/enroll_speaker.py
 ```
 
-按提示朗读"贾维斯"即可完成录入，样本保存在 `sound_sample/` 目录。
+按提示朗读"贾维斯"即可完成录入，样本保存在 `data/enrollment/` 目录。
 
 ### 热词优化
 

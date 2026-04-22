@@ -115,4 +115,4 @@ trap cleanup SIGINT SIGTERM
 
 echo "启动语音助手..."
 cd "${PROJECT_DIR}"
-"$VENV_PYTHON" "${PROJECT_DIR}/src/main.py" "$@"
+"$VENV_PYTHON" -u "${PROJECT_DIR}/src/main.py" "$@"
