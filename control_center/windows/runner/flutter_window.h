@@ -23,6 +23,11 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  void requestMicrophonePermission(
+      std::unique_ptr<flutter::MethodResult<>> result);
+  void checkMicrophonePermission(
+      std::unique_ptr<flutter::MethodResult<>> result);
+
   // The project to run.
   flutter::DartProject project_;
 

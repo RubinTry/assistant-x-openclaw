@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import '../base/speaker_service_base.dart';
 
-class SpeakerService {
+class MacOSSpeakerService implements SpeakerServiceBase {
   String get _expandedPath {
     final home = Platform.environment['HOME'] ?? '';
     return '$home/.openclaw/workspace/voice-assistant/assistant-x-openclaw';
@@ -11,6 +12,7 @@ class SpeakerService {
   String get _soundDir => '$_expandedPath/data/enrollment';
   String get _speakersFile => '$_soundDir/speakers.json';
 
+  @override
   Future<List<String>> loadSpeakers() async {
     final file = File(_speakersFile);
     if (!await file.exists()) return [];
@@ -23,6 +25,7 @@ class SpeakerService {
     }
   }
 
+  @override
   Stream<String> enrollSpeakerStream() async* {
     final process = await Process.start(
       _venvPythonPath,
@@ -38,6 +41,7 @@ class SpeakerService {
     }
   }
 
+  @override
   Future<void> deleteSpeaker(String name) async {
     final speakers = await _loadSpeakersData();
     final speaker = speakers.firstWhere(
@@ -45,7 +49,6 @@ class SpeakerService {
       orElse: () => <String, dynamic>{},
     );
 
-    // 删除对应的 WAV 文件
     final wavFile = speaker['wav_file'] as String?;
     if (wavFile != null) {
       final wavPath = '$_soundDir/$wavFile';
@@ -58,6 +61,7 @@ class SpeakerService {
     await _saveSpeakersData(speakers);
   }
 
+  @override
   Future<void> clearAllSpeakers() async {
     final result = await Process.run(_venvPythonPath, [
       '$_expandedPath/scripts/enroll_speaker.py',

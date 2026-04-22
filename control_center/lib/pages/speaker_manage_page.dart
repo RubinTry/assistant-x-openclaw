@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/speaker_service.dart';
-import '../services/voice_assistant_service.dart';
+import '../services/service_factory.dart';
 
 class SpeakerManagePage extends StatefulWidget {
   final void Function(String)? onLog;
@@ -12,7 +11,7 @@ class SpeakerManagePage extends StatefulWidget {
 }
 
 class _SpeakerManagePageState extends State<SpeakerManagePage> {
-  final _service = SpeakerService();
+  final _service = ServiceFactory.speakerService;
   final _speakers = <String>[];
   bool _isLoading = false;
 
@@ -244,7 +243,7 @@ class _EnrollDialogState extends State<_EnrollDialog> {
   final _scrollController = ScrollController();
   bool _isRunning = true;
   bool _success = false;
-  final _service = SpeakerService();
+  final _service = ServiceFactory.speakerService;
 
   @override
   void initState() {

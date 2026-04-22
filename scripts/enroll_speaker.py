@@ -190,32 +190,13 @@ def enroll_speaker():
 
         # 用 ffmpeg 去除静音部分，只保留有声音的片段
         log("正在去除静音片段...")
-        import subprocess
-        trimmed_path = os.path.join(SAMPLE_DIR, f"{timestamp}_trimmed.wav")
-        try:
-            result = subprocess.run([
-                'ffmpeg', '-y', '-i', wav_path,
-                '-af', 'silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:detection=peak,areverse,silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:detection=peak,areverse',
-                '-ac', '1', '-ar', '16000',
-                trimmed_path
-            ], capture_output=True, text=True, timeout=30)
-            if result.returncode == 0:
-                os.remove(wav_path)
-                os.rename(trimmed_path, wav_path)
-                # 重新加载处理后的音频
-                samples, _ = sf.read(wav_path, dtype='float32')
-                log(f"静音已去除，剩余音频长度: {len(samples)} samples ({len(samples)/sample_rate:.1f}s)")
-            else:
-                log(f"ffmpeg 处理失败: {result.stderr}")
-        except FileNotFoundError:
-            log("警告: ffmpeg 未安装，跳过静音去除")
-        except Exception as e:
-            log(f"ffmpeg 处理出错: {e}")
-
-        log("正在提取声纹...")
-        # 重新加载（可能被 ffmpeg 修剪过的）音频
+        import librosa
         samples, _ = sf.read(wav_path, dtype='float32')
         samples = samples.flatten()
+        trimmed, _ = librosa.effects.trim(samples, top_db=20)
+        if len(trimmed) < len(samples):
+            log(f"静音已去除，剩余音频长度: {len(trimmed)} samples ({len(trimmed)/sample_rate:.1f}s)")
+            samples = trimmed
         stream = extractor.create_stream()
         stream.accept_waveform(sample_rate=sample_rate, waveform=samples)
         stream.input_finished()

@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import '../base/voice_assistant_service_base.dart';
 
-class VoiceAssistantService {
+class MacOSVoiceAssistantService implements VoiceAssistantServiceBase {
   Process? _pythonProcess;
   final _outputController = StreamController<String>.broadcast();
   bool _shouldKeepRunning = false;
@@ -11,7 +12,9 @@ class VoiceAssistantService {
   bool _isStarting = false;
   Completer<void>? _startCompleter;
 
+  @override
   Stream<String> get outputStream => _outputController.stream;
+  @override
   bool get isRunning => _pythonProcess != null && !_processExited;
 
   String get expandedPath {
@@ -19,6 +22,7 @@ class VoiceAssistantService {
     return '$home/.openclaw/workspace/voice-assistant/assistant-x-openclaw';
   }
 
+  @override
   Future<void> start() async {
     if (_isStarting) return;
     _isStarting = true;
@@ -87,6 +91,7 @@ class VoiceAssistantService {
     _startCompleter?.complete();
   }
 
+  @override
   Future<void> stop() async {
     _shouldKeepRunning = false;
     _isStarting = false;
@@ -109,6 +114,22 @@ class VoiceAssistantService {
     await _killJarvisOverlay();
 
     _addLog('语音助手已停止');
+  }
+
+  @override
+  Future<void> forceCleanup() async {
+    _shouldKeepRunning = false;
+    _monitorTimer?.cancel();
+    _monitorTimer = null;
+    _processExited = true;
+
+    if (_pythonProcess != null) {
+      _pythonProcess!.kill();
+      _pythonProcess = null;
+    }
+
+    await cleanupOldProcesses();
+    await _killJarvisOverlay();
   }
 
   Future<void> cleanupOldProcesses() async {
@@ -160,10 +181,12 @@ class VoiceAssistantService {
     _outputController.add(message);
   }
 
+  @override
   void addLog(String message) {
     _outputController.add(message);
   }
 
+  @override
   Future<void> setDndMode(bool enabled) async {
     try {
       final sock = await Socket.connect('127.0.0.1', 18790, timeout: const Duration(seconds: 2));
@@ -173,6 +196,7 @@ class VoiceAssistantService {
     } catch (_) {}
   }
 
+  @override
   void dispose() {
     _monitorTimer?.cancel();
     _outputController.close();

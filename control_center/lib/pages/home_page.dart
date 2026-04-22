@@ -1,8 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:window_manager/window_manager.dart';
-import '../services/voice_assistant_service.dart';
+import '../services/service_factory.dart';
 import '../models/log_entry.dart';
 import 'speaker_manage_page.dart';
 
@@ -14,17 +13,18 @@ class HomePage extends StatefulWidget {
 }
 
 class HomePageState extends State<HomePage> {
-  final _service = VoiceAssistantService();
+  final _service = ServiceFactory.voiceAssistantService;
+  final _permissionService = ServiceFactory.permissionService;
   final _logs = <LogEntry>[];
   final _scrollController = ScrollController();
   bool _isRunning = false;
-  bool _isWindowVisible = true;
   ServerSocket? _tcpServer;
   static const int _speakerRejectedPort = 18792;
 
   @override
   void initState() {
     super.initState();
+    _requestPermissions();
     _service.outputStream.listen((msg) {
       setState(() {
         _logs.add(LogEntry(timestamp: DateTime.now(), message: msg));
@@ -61,12 +61,7 @@ class HomePageState extends State<HomePage> {
   }
 
   void _showSpeakerRejectedDialog() {
-    debugPrint('[_showSpeakerRejectedDialog] START mounted=$mounted _isWindowVisible=$_isWindowVisible');
-    if (!mounted || !_isWindowVisible) {
-      debugPrint('[_showSpeakerRejectedDialog] skipped: mounted=$mounted _isWindowVisible=$_isWindowVisible');
-      return;
-    }
-    debugPrint('[_showSpeakerRejectedDialog] showing dialog');
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -96,6 +91,15 @@ class HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _requestPermissions() async {
+    if (Platform.isMacOS || Platform.isWindows) {
+      final status = await _permissionService.checkMicrophonePermission();
+      if (status != 'granted') {
+        await _permissionService.requestMicrophonePermission();
+      }
+    }
+  }
+
   @override
   void dispose() {
     _tcpServer?.close();
@@ -106,7 +110,7 @@ class HomePageState extends State<HomePage> {
 
   void _start() async {
     await _service.start();
-    setState(() => _isRunning = true);
+    setState(() => _isRunning = _service.isRunning);
   }
 
   void _stop() async {
@@ -121,11 +125,20 @@ class HomePageState extends State<HomePage> {
   void handleTrayAction(String action) {
     switch (action) {
       case 'start':
-        if (!_isRunning) _start();
+        _start();
         break;
       case 'stop':
-        if (_isRunning) _stop();
+        _forceStop();
         break;
+    }
+  }
+
+  Future<void> _forceStop() async {
+    if (Platform.isMacOS) {
+      final service = _service as dynamic;
+      await service.forceCleanup();
+    } else {
+      await _service.stop();
     }
   }
 
