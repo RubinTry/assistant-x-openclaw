@@ -3,6 +3,9 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
+#include <flutter/method_codec.h>
+#include <flutter/standard_method_codec.h>
 
 #include <memory>
 

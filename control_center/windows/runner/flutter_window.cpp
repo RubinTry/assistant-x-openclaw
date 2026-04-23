@@ -35,16 +35,17 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
 
-  auto messenger = flutter_controller_->engine()->binary_messenger();
-  auto channel = std::make_unique<flutter::MethodChannel>(
-      messenger, "com.assistant/permission");
+  auto messenger = flutter_controller_->engine()->messenger();
+  auto channel = std::make_unique<flutter::MethodChannel<>>(
+      messenger, "com.assistant/permission",
+      &flutter::StandardMethodCodec::GetInstance());
 
   channel->SetMethodCallHandler(
-      [&](const flutter::MethodCall& call,
+      [&](const flutter::MethodCall<>& call,
           std::unique_ptr<flutter::MethodResult<>> result) {
-        if (call.method() == "requestMicrophonePermission") {
+        if (call.method_name() == "requestMicrophonePermission") {
           requestMicrophonePermission(std::move(result));
-        } else if (call.method() == "checkMicrophonePermission") {
+        } else if (call.method_name() == "checkMicrophonePermission") {
           checkMicrophonePermission(std::move(result));
         } else {
           result->NotImplemented();

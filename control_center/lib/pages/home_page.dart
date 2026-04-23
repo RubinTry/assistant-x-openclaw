@@ -137,8 +137,11 @@ class HomePageState extends State<HomePage> {
     if (Platform.isMacOS) {
       final service = _service as dynamic;
       await service.forceCleanup();
-    } else {
-      await _service.stop();
+    } else if(Platform.isWindows){
+      final service = _service as dynamic;
+      await service.forceCleanup();
+    }else {
+      _service.stop();
     }
   }
 

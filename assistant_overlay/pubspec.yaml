@@ -25,9 +25,20 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-
-
   flutter_lints: ^6.0.0
+  msix: ^3.16.13
+
+msix_config:
+  display_name: Assistants-Overlay
+  publisher_display_name: rubintry
+  identity_name: com.jarvis.assistant-overlay
+  msix_version: 1.0.0.0
+  logo_path: images/logo.png
+  trim_logo: false
+  capabilities: internetClient, location, microphone, webcam
+  languages: en-us, zh-cn
+  enable_at_startup: false
+  store: false
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
