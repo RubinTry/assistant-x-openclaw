@@ -76,6 +76,7 @@ cython_debug/
 
 # Build artifacts & bundles
 *.zip
+*.dmg
 *.log
 
 # Flutter specific
@@ -128,3 +129,4 @@ windows/runner/*.ico.bak
 
 # Trae AI
 .trae/
+
