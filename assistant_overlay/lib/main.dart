@@ -7,16 +7,20 @@ import 'agent_overlay.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
- if(Platform.isWindows){
-   await windowManager.ensureInitialized();
-   await acrylic.Window.initialize();
+  if (Platform.isWindows) {
+    await windowManager.ensureInitialized();
 
-   windowManager.waitUntilReadyToShow(null, () async {
-     await acrylic.Window.setEffect(effect: acrylic.WindowEffect.transparent);
-     await windowManager.setIgnoreMouseEvents(true);
-     await windowManager.setAlwaysOnTop(true);
-   });
- }
+    await acrylic.Window.initialize();
+    await acrylic.Window.setEffect(effect: acrylic.WindowEffect.transparent);
+    windowManager.waitUntilReadyToShow(
+      WindowOptions(fullScreen: true, skipTaskbar: true),
+      () async {
+        await windowManager.setIgnoreMouseEvents(true);
+        await windowManager.setAlwaysOnTop(true);
+        await windowManager.show();
+      },
+    );
+  }
 
   runApp(const JarvisApp());
 }

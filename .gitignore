@@ -69,12 +69,31 @@ cython_debug/
 
 # IDE config files
 .idea/
+.vscode/
 
 # Qwen Code config
 .qwen/
 
 # Build artifacts & bundles
 *.zip
+*.log
+
+# Flutter specific
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.lock
+pubspec.lock
+
+# Flutter build outputs
+**/build/
+**/macos/Pods/
+**/macos/.symlinks/
+**/macos/Flutter/ephemeral/
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/linux/flutter/ephemeral/
+**/linux/.fvm/
+**/windows/flutter/ephemeral/
 
 # Flutter overlay generated files
 assistant_overlay/macos/Pods/
@@ -85,8 +104,27 @@ assistant_overlay/windows/flutter/ephemeral/
 sound_sample/*
 !sound_sample/.gitkeep
 models/
+data/enrollment/*.wav
+data/enrollment/*.json
 *.DS_Store
 
 # Auto-generated keywords file (merged at startup)
 keywords/global.txt
 
+# Chrome device cache
+.dart_tool/chrome-device/
+
+# Log files
+*_01.log
+*_02.log
+flutter_*.log
+
+# macOS build
+macos/Runner/*.entitlements.bak
+macos/Runner/AppDelegate.swift.bak
+
+# Windows build
+windows/runner/*.ico.bak
+
+# Trae AI
+.trae/

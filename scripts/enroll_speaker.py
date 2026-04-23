@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import argparse
+import json
 import numpy as np
 import soundfile as sf
 import sherpa_onnx
@@ -17,6 +18,7 @@ import sherpa_onnx
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 SAMPLE_DIR = os.path.join(PROJECT_DIR, "data", "enrollment")
+SPEAKERS_FILE = os.path.join(SAMPLE_DIR, "speakers.json")
 MODEL_PATH = os.path.join(
     PROJECT_DIR, "models", "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
 )
@@ -29,6 +31,32 @@ def log(msg):
     """打印日志并立即刷新"""
     print(msg)
     sys.stdout.flush()
+
+
+def set_dnd_mode(enabled: bool):
+    """通过 HTTP 请求启用/禁用 DND 模式"""
+    import urllib.request
+    try:
+        url = f"http://127.0.0.1:18790/{'dnd' if enabled else 'dnd/disable'}"
+        req = urllib.request.Request(url, method='POST')
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            resp.read()
+    except Exception:
+        pass
+
+
+def load_speakers():
+    """加载已注册的声纹列表"""
+    if os.path.exists(SPEAKERS_FILE):
+        with open(SPEAKERS_FILE, 'r') as f:
+            return json.load(f)
+    return []
+
+
+def save_speakers(speakers):
+    """保存声纹列表到文件"""
+    with open(SPEAKERS_FILE, 'w') as f:
+        json.dump(speakers, f, indent=2)
 
 
 def create_recognizer():
@@ -86,93 +114,157 @@ def enroll_speaker():
 
     os.makedirs(SAMPLE_DIR, exist_ok=True)
 
-    log("初始化声纹提取器...")
-    config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-        model=MODEL_PATH, num_threads=2
-    )
-    extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
-    dim = extractor.dim
-    manager = sherpa_onnx.SpeakerEmbeddingManager(dim)
-    log(f"声纹提取器初始化成功，维度: {dim}")
-
-    log("初始化语音识别器...")
-    recognizer = create_recognizer()
-    log("语音识别器初始化成功")
+    # 启用勿扰模式，暂停唤醒词监听
+    set_dnd_mode(True)
+    log("已暂停唤醒词监听")
 
     try:
+        log("初始化声纹提取器...")
+        config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+            model=MODEL_PATH, num_threads=2
+        )
+        extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
+        dim = extractor.dim
+        manager = sherpa_onnx.SpeakerEmbeddingManager(dim)
+        log(f"声纹提取器初始化成功，维度: {dim}")
+
+        log("初始化语音识别器...")
+        recognizer = create_recognizer()
+        log("语音识别器初始化成功")
+
         import sounddevice as sd
     except ImportError:
         log("错误：需要安装 sounddevice")
         log("请运行: pip install sounddevice")
+        set_dnd_mode(False)
         sys.exit(1)
 
-    sample_rate = 16000
-    duration = 20
+    try:
+        sample_rate = 16000
+        duration = 20
 
-    log("\n" + "=" * 50)
-    log("请在 20 秒内重复朗读「贾维斯」")
-    log("=" * 50)
+        log("\n" + "=" * 50)
+        log("请在 20 秒内重复朗读「贾维斯」")
+        log("=" * 50)
 
-    for i in range(3, 0, -1):
-        log(f"准备录音: {i}...")
-        time.sleep(1)
+        for i in range(3, 0, -1):
+            log(f"准备录音: {i}...")
+            time.sleep(1)
 
-    log("开始录音，请重复朗读「贾维斯」！")
-    log(f"录音时长: {duration} 秒")
+        log("开始录音，请重复朗读「贾维斯」！")
+        log(f"录音时长: {duration} 秒")
 
-    recording = sd.rec(
-        int(duration * sample_rate), samplerate=sample_rate, channels=1, dtype="float32"
-    )
+        recording = sd.rec(
+            int(duration * sample_rate), samplerate=sample_rate, channels=1, dtype="float32"
+        )
 
-    recognized_texts = []
-    chunk_size = sample_rate
-    start_time = time.time()
+        recognized_texts = []
+        chunk_size = sample_rate
 
-    for i in range(duration, 0, -1):
-        log(f"录音中... {i}秒")
-        time.sleep(1)
+        for i in range(duration, 0, -1):
+            log(f"录音中... {i}秒")
+            time.sleep(1)
 
-        current_pos = int((duration - i) * sample_rate)
-        if current_pos > 0:
-            chunk = recording[:current_pos].flatten()
-            if len(chunk) >= chunk_size:
-                text = recognize_audio(chunk, sample_rate, recognizer)
-                if text and text not in recognized_texts:
-                    recognized_texts.append(text)
-                    log(f"  识别: {text}")
+            current_pos = int((duration - i) * sample_rate)
+            if current_pos > 0:
+                chunk = recording[:current_pos].flatten()
+                if len(chunk) >= chunk_size:
+                    text = recognize_audio(chunk, sample_rate, recognizer)
+                    if text and text not in recognized_texts:
+                        recognized_texts.append(text)
+                        log(f"  识别: {text}")
 
-    log("录音完成！")
-    sd.wait()
+        log("录音完成！")
+        sd.wait()
 
-    log("\n" + "=" * 50)
-    log("识别结果:")
-    for t in recognized_texts:
-        log(f"  - {t}")
-    log("=" * 50)
+        log("\n" + "=" * 50)
+        log("识别结果:")
+        for t in recognized_texts:
+            log(f"  - {t}")
+        log("=" * 50)
 
-    timestamp = int(time.time() * 1000)
-    wav_path = os.path.join(SAMPLE_DIR, f"{timestamp}.wav")
-    sf.write(wav_path, recording, sample_rate)
-    log(f"录音已保存: {wav_path}")
+        timestamp = int(time.time() * 1000)
+        wav_path = os.path.join(SAMPLE_DIR, f"{timestamp}.wav")
+        sf.write(wav_path, recording, sample_rate)
+        log(f"录音已保存: {wav_path}")
 
-    log("正在提取声纹...")
-    samples = recording.flatten()
-    stream = extractor.create_stream()
-    stream.accept_waveform(sample_rate=sample_rate, waveform=samples)
-    stream.input_finished()
-    embedding = extractor.compute(stream)
-    embedding = np.array(embedding)
-    log(f"声纹提取成功，shape: {embedding.shape}")
+        # 用 ffmpeg 去除静音部分，只保留有声音的片段
+        log("正在去除静音片段...")
+        import librosa
+        samples, _ = sf.read(wav_path, dtype='float32')
+        samples = samples.flatten()
+        trimmed, _ = librosa.effects.trim(samples, top_db=20)
+        if len(trimmed) < len(samples):
+            log(f"静音已去除，剩余音频长度: {len(trimmed)} samples ({len(trimmed)/sample_rate:.1f}s)")
+            samples = trimmed
+        stream = extractor.create_stream()
+        stream.accept_waveform(sample_rate=sample_rate, waveform=samples)
+        stream.input_finished()
+        embedding = extractor.compute(stream)
+        embedding = np.array(embedding)
+        log(f"声纹提取成功，shape: {embedding.shape}")
 
-    username = f"user_{timestamp}"
-    success = manager.add(username, embedding)
-    if success:
-        log(f"✓ 声纹注册成功: {username}")
-        log("\n声纹录入完成！")
-    else:
-        log("✗ 声纹注册失败")
-        sys.exit(1)
+        username = f"user_{timestamp}"
+        success = manager.add(username, embedding)
+        if success:
+            speakers = load_speakers()
+            speakers.append({
+                "name": username,
+                "timestamp": timestamp,
+                "wav_file": f"{timestamp}.wav"
+            })
+            save_speakers(speakers)
+            log(f"✓ 声纹注册成功: {username}")
+            log("\n声纹录入完成！")
+        else:
+            log("✗ 声纹注册失败")
+    finally:
+        set_dnd_mode(False)
+        log("已恢复唤醒词监听")
+
+
+def clear_all_speakers():
+    """清空所有声纹"""
+    log("正在清空所有声纹...")
+    
+    # 删除所有 WAV 文件
+    if os.path.exists(SAMPLE_DIR):
+        for file in os.listdir(SAMPLE_DIR):
+            if file.endswith('.wav'):
+                file_path = os.path.join(SAMPLE_DIR, file)
+                os.remove(file_path)
+                log(f"  已删除: {file}")
+    
+    # 清空 speakers.json
+    if os.path.exists(SPEAKERS_FILE):
+        save_speakers([])
+    
+    log("✓ 所有声纹已清空")
+
+
+def list_speakers():
+    """列出所有已注册的声纹"""
+    speakers = load_speakers()
+    if not speakers:
+        log("暂无已注册的声纹")
+        return
+    
+    log(f"已注册声纹 ({len(speakers)} 个):")
+    for speaker in speakers:
+        log(f"  - {speaker['name']}")
 
 
 if __name__ == "__main__":
-    enroll_speaker()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='声纹录入工具')
+    parser.add_argument('--clear', action='store_true', help='清空所有声纹')
+    parser.add_argument('--list', action='store_true', help='列出所有声纹')
+    args = parser.parse_args()
+    
+    if args.clear:
+        clear_all_speakers()
+    elif args.list:
+        list_speakers()
+    else:
+        enroll_speaker()
