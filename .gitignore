@@ -105,6 +105,7 @@ sound_sample/*
 !sound_sample/.gitkeep
 models/
 data/enrollment/*.wav
+data/enrollment/*.json
 *.DS_Store
 
 # Auto-generated keywords file (merged at startup)
