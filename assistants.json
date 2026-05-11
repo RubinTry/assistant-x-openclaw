@@ -45,6 +45,7 @@
                 "退下",
                 "退下吧",
                 "没事了",
+                "没事",
                 "没有了",
                 "结束",
                 "行了",
@@ -59,7 +60,8 @@
                 "step back",
                 "step down",
                 "back off",
-                "back out"
+                "back out",
+                "退下"
             ],
             "restart_keywords": [
                 "restart",

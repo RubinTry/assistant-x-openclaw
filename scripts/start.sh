@@ -5,6 +5,16 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$( cd "${SCRIPT_DIR}/.." && pwd )"
 VENV_PYTHON="${PROJECT_DIR}/venv/bin/python"
 
+# ── 芯片检测，自动选择最优 provider ────────────────────
+if [[ $(uname -m) == "arm64" ]]; then
+    PROVIDER="coreml"
+elif [[ $(uname -m) == "x86_64" ]]; then
+    PROVIDER="mps"
+else
+    PROVIDER="cpu"
+fi
+echo "[启动] 检测到芯片架构: $(uname -m)，使用 provider: $PROVIDER"
+
 if [ ! -f "$VENV_PYTHON" ]; then
     echo "错误: 虚拟环境不存在，请先创建: python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
     exit 1
@@ -63,6 +73,15 @@ else
     sleep 1
 fi
 
+# 清理已有的语音助手进程（避免重启后出现多个实例）
+echo "清理已有的语音助手进程..."
+PIDS=$(pgrep -f "${PROJECT_DIR}/src/main.py" 2>/dev/null)
+if [ -n "$PIDS" ]; then
+    echo "  杀死旧的语音助手进程: $PIDS"
+    kill -9 $PIDS 2>/dev/null
+    sleep 1
+fi
+
 # 查找 JARVIS Overlay app
 JARVIS_APP=""
 DEBUG_APP="${PROJECT_DIR}/assistant_overlay/build/macos/Build/Products/Debug/assistant_overlay.app"
@@ -115,4 +134,4 @@ trap cleanup SIGINT SIGTERM
 
 echo "启动语音助手..."
 cd "${PROJECT_DIR}"
-"$VENV_PYTHON" -u "${PROJECT_DIR}/src/main.py" "$@"
+"$VENV_PYTHON" -u "${PROJECT_DIR}/src/main.py" --provider "$PROVIDER" "$@"
