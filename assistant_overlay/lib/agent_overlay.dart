@@ -22,10 +22,10 @@ class AgentOverlay extends StatefulWidget {
 class _AgentOverlayState extends State<AgentOverlay>
     with TickerProviderStateMixin {
   final JarvisTCPServer _tcpServer = JarvisTCPServer();
-
   final Map<String, AgentVisual> _agents = {};
-
   String _currentAgentName = 'jarvis';
+  DateTime? _lastWakeTime;
+  static const _wakeCooldownMs = 1500;
 
   @override
   void initState() {
@@ -55,6 +55,16 @@ class _AgentOverlayState extends State<AgentOverlay>
 
   void _handleCommand(String command) {
     print('[AgentOverlay] Received command: $command');
+
+    if (command == 'wake') {
+      final now = DateTime.now();
+      if (_lastWakeTime != null &&
+          now.difference(_lastWakeTime!).inMilliseconds < _wakeCooldownMs) {
+        print('[AgentOverlay] Ignoring duplicate wake command');
+        return;
+      }
+      _lastWakeTime = now;
+    }
 
     if (command.startsWith('agent:')) {
       final agentName = command.substring(6).trim();

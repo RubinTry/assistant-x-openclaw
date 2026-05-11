@@ -10,6 +10,7 @@
 import argparse
 import json
 import os
+import platform
 import random
 import sys
 import time
@@ -18,6 +19,15 @@ import queue
 import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+
+
+def _detect_best_provider() -> str:
+    """根据硬件平台自动选择最优 provider"""
+    if platform.system() != "Darwin":
+        return "cpu"
+    if platform.machine() == "arm64":
+        return "coreml"
+    return "mps"
 
 _assistant_instance = None
 PID_FILE = os.path.join(tempfile.gettempdir(), "voice_assistant.pid")
@@ -106,7 +116,7 @@ _ASSISTANTS_CFG_PATH = os.path.join(_PROJECT_DIR, "assistants.json")
 _SPEAKER_MODEL_PATH = os.path.join(_PROJECT_DIR, "models", "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx")
 _SPEAKER_DIR = os.path.join(_PROJECT_DIR, "data", "enrollment")
 _SPEAKER_FILE = os.path.join(_SPEAKER_DIR, "speakers.json")
-_SPEAKER_THRESHOLD = 0.5  # 声纹相似度阈值
+_SPEAKER_THRESHOLD = 0.4  # 声纹相似度阈值
 _SPEAKER_NOTIFY_PORT = 18792  # control_center TCP 通知端口
 
 _dnd_mode = False  # Do Not Disturb 模式，注册时不响应唤醒词
@@ -143,6 +153,12 @@ def _load_speakers():
         with open(_SPEAKER_FILE, 'r') as f:
             return json.load(f)
     return []
+
+
+def _save_speakers(speakers):
+    """保存声纹列表到文件"""
+    with open(_SPEAKER_FILE, 'w') as f:
+        json.dump(speakers, f, indent=2)
 
 
 def _create_speaker_extractor():
@@ -377,6 +393,19 @@ class VoiceAssistant:
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
         self._wake_buffer_max_samples = int(self.sample_rate * 3)  # 最多存3秒
 
+        # VAD 前置缓存（用于待机时轻量级语音检测）
+        self._vad_buffer = []
+        self._vad_buffer_max_seconds = 2
+        self._vad_buffer_max_samples = int(self.sample_rate * self._vad_buffer_max_seconds)
+
+        # 连续对话模式音频缓冲（用于声纹验证）
+        self._conv_audio_buffer = []
+        self._conv_buffer_max_seconds = 3
+        self._conv_buffer_max_samples = int(self.sample_rate * self._conv_buffer_max_seconds)
+        self._speaker_verified = False  # 标记唤醒者是否已通过声纹验证
+        self._speaker_embeddings = {}  # name -> embedding array，用于渐进更新
+        self._verified_speaker_name = None  # 当前验证通过的说话人
+
         self._is_openclaw_busy = False
         self._is_processing = False  # True: 从指令发出到TTS播报完毕的全流程
         self._openclaw_request_active = threading.Event()
@@ -437,6 +466,9 @@ class VoiceAssistant:
         self._speaker_enabled = False
         self._init_speaker_verification()
 
+        # ── VAD 配置初始化（用于待机时轻量级语音检测）───────────
+        self._init_vad_config()
+
         # OpenClaw bridge 会在切换 assistant 时动态创建
         self.openclaw = None
         self._init_openclaw()
@@ -452,7 +484,7 @@ class VoiceAssistant:
     def _init_speaker_verification(self):
         """初始化声纹验证系统"""
         speakers = _load_speakers()
-        
+
         if not speakers:
             print("[声纹] 未检测到已注册的声纹样本")
             print("[声纹] 声纹验证已启用（强制模式）")
@@ -461,46 +493,58 @@ class VoiceAssistant:
             self._speaker_enabled = True
             self._speaker_extractor = None
             self._speaker_manager = None
+            self._speaker_embeddings = {}
+            self._verified_speaker_name = None
             return
-        
+
         if not _check_speaker_model():
             print("[声纹] 声纹模型不存在，跳过声纹验证")
             print(f"[声纹] 请下载模型: {_SPEAKER_MODEL_PATH}")
             return
-        
+
         print(f"[声纹] 发现 {len(speakers)} 个已注册声纹，初始化验证系统...")
-        
+
         self._speaker_extractor = _create_speaker_extractor()
         if self._speaker_extractor is None:
             print("[声纹] 提取器初始化失败，禁用声纹验证")
             return
-        
+
         dim = self._speaker_extractor.dim
         self._speaker_manager = _create_speaker_manager(dim)
-        
-        # 加载所有已注册的声纹
+        self._speaker_embeddings = {}
+        self._verified_speaker_name = None
+
+        import soundfile as sf
         loaded_count = 0
         for speaker_info in speakers:
             wav_file = os.path.join(_SPEAKER_DIR, speaker_info.get('wav_file', ''))
             if not os.path.exists(wav_file):
                 print(f"[声纹] 警告: 音频文件不存在: {wav_file}")
                 continue
-            
+
             try:
-                import soundfile as sf
-                samples, sr = sf.read(wav_file, dtype='float32')
-                if len(samples.shape) > 1:
-                    samples = samples.mean(axis=1)
-                
-                print(f"[声纹调试] 加载声纹文件: {wav_file}, 样本长度: {len(samples)}")
-                embedding = _extract_embedding(self._speaker_extractor, samples.tolist(), sr)
-                if embedding is not None:
-                    print(f"[声纹调试] 已提取嵌入，前5值: {embedding[:5].tolist()}")
-                    name = speaker_info.get('name', f"user_{speaker_info.get('timestamp', 0)}")
-                    emb_list = embedding.tolist()
+                name = speaker_info.get('name', f"user_{speaker_info.get('timestamp', 0)}")
+                emb_list = None
+
+                if 'embedding' in speaker_info and speaker_info['embedding']:
+                    emb_list = speaker_info['embedding']
+                    print(f"[声纹调试] 从JSON加载嵌入: {name}, 前5值: {emb_list[:5]}")
+                else:
+                    samples, sr = sf.read(wav_file, dtype='float32')
+                    if len(samples.shape) > 1:
+                        samples = samples.mean(axis=1)
+                    print(f"[声纹调试] 加载声纹文件: {wav_file}, 样本长度: {len(samples)}")
+                    embedding = _extract_embedding(self._speaker_extractor, samples.tolist(), sr)
+                    if embedding is not None:
+                        emb_list = embedding.tolist()
+                        speaker_info['embedding'] = emb_list
+                        _save_speakers(speakers)
+                        print(f"[声纹] 已提取并保存嵌入: {name}")
+
+                if emb_list is not None:
                     success = self._speaker_manager.add(name, emb_list)
-                    print(f"[声纹调试] manager.add('{name}') 返回: {success}, 嵌入前5值: {emb_list[:5]}")
                     if success:
+                        self._speaker_embeddings[name] = np.array(emb_list)
                         loaded_count += 1
                         print(f"[声纹] 已加载: {name}")
                         print(f"[声纹调试] 当前已注册: {self._speaker_manager.all_speakers}")
@@ -508,14 +552,58 @@ class VoiceAssistant:
                         print(f"[声纹] 加载失败: {name}")
             except Exception as e:
                 print(f"[声纹] 处理文件失败 {wav_file}: {e}")
-        
+
         if loaded_count > 0:
             self._speaker_enabled = True
             print(f"[声纹] 验证系统已启用（{loaded_count} 个声纹已加载）")
             print(f"[声纹] 唤醒时将验证说话人身份")
         else:
             print("[声纹] 没有成功加载任何声纹，禁用验证")
-    
+
+    def _init_vad_config(self):
+        """初始化 VAD 配置（用于待机时轻量级语音检测）"""
+        vad_model = os.path.expanduser(self.args.vad_model)
+        if not os.path.exists(vad_model):
+            print("[VAD] VAD 模型不存在: {}，待机时将不使用 VAD 预检测".format(vad_model))
+            self.vad_config = None
+            return
+
+        try:
+            self.vad_config = sherpa_onnx.VadModelConfig(
+                silero_vad=sherpa_onnx.SileroVadModelConfig(
+                    model=vad_model,
+                    threshold=0.1,
+                    min_silence_duration=0.3,
+                    min_speech_duration=0.1,
+                    max_speech_duration=30,
+                    window_size=512,
+                ),
+                sample_rate=16000,
+                num_threads=1,
+                provider=self.args.provider,
+            )
+            print("[VAD] VAD 配置创建成功（待机预检测模式）")
+        except Exception as e:
+            print("[VAD] provider={} 不可用，回退到 cpu: {}".format(self.args.provider, e))
+            try:
+                self.vad_config = sherpa_onnx.VadModelConfig(
+                    silero_vad=sherpa_onnx.SileroVadModelConfig(
+                        model=vad_model,
+                        threshold=0.1,
+                        min_silence_duration=0.3,
+                        min_speech_duration=0.1,
+                        max_speech_duration=30,
+                        window_size=512,
+                    ),
+                    sample_rate=16000,
+                    num_threads=1,
+                    provider="cpu",
+                )
+                print("[VAD] VAD 配置创建成功（cpu fallback）")
+            except Exception as e2:
+                print("[VAD] VAD 配置创建失败: {}".format(e2))
+                self.vad_config = None
+
     def _verify_speaker_on_wake(self, samples, sample_rate=16000):
         """唤醒时验证声纹
         
@@ -534,8 +622,8 @@ class VoiceAssistant:
             return False
         
         if self._speaker_extractor is None or self._speaker_manager is None:
-            print("[声纹] 验证系统未就绪，跳过验证")
-            return True
+            print("[声纹] 验证系统未就绪，拒绝唤醒")
+            return False
         
         # 检查音频样本是否有效
         if not samples or len(samples) == 0:
@@ -551,13 +639,116 @@ class VoiceAssistant:
         is_verified, speaker_name, score = _verify_speaker(
             self._speaker_extractor, self._speaker_manager, samples, sample_rate
         )
-        
+
         if is_verified:
             print(f"[声纹] 验证通过: {speaker_name} (score: {score:.3f})")
+            self._verified_speaker_name = speaker_name
+            self._update_speaker_progressive(samples, sample_rate)
             return True
         else:
             print(f"[声纹] 验证失败: 未识别到已注册声纹 (score: {score:.3f})")
             print("[声纹] 请使用已注册声纹的用户唤醒，或使用 control_center 注册新声纹")
+            return False
+
+    def _update_speaker_progressive(self, samples, sample_rate=16000):
+        """用最新对话音频渐进更新已验证用户的声纹嵌入
+
+        取前5秒音频，静音过滤后提取嵌入，与旧嵌入各50%平均融合，
+        然后持久化到文件并更新内存中的manager。
+        """
+        if not self._speaker_enabled or self._verified_speaker_name is None:
+            return
+
+        if self._speaker_extractor is None or self._speaker_manager is None:
+            return
+
+        import soundfile as sf
+        import librosa
+
+        max_samples = int(sample_rate * 5)
+        if len(samples) > max_samples:
+            samples = samples[-max_samples:]
+
+        try:
+            trimmed, _ = librosa.effects.trim(samples, top_db=20)
+        except Exception:
+            trimmed = samples
+
+        if len(trimmed) < sample_rate * 0.5:
+            print(f"[声纹] 渐进更新跳过: 静音过滤后音频太短 ({len(trimmed)} samples)")
+            return
+
+        embedding = _extract_embedding(self._speaker_extractor, trimmed, sample_rate)
+        if embedding is None:
+            print("[声纹] 渐进更新跳过: 嵌入提取失败")
+            return
+
+        name = self._verified_speaker_name
+        old_emb = self._speaker_embeddings.get(name)
+        if old_emb is not None:
+            new_emb = 0.5 * old_emb + 0.5 * embedding
+        else:
+            new_emb = embedding
+
+        new_emb_list = new_emb.tolist()
+        self._speaker_embeddings[name] = new_emb
+
+        self._speaker_manager.remove(name)
+        success = self._speaker_manager.add(name, new_emb_list)
+        if success:
+            print(f"[声纹] 渐进更新成功: {name}")
+        else:
+            print(f"[声纹] 渐进更新失败: manager更新失败")
+
+        speakers = _load_speakers()
+        for sp in speakers:
+            if sp.get('name') == name:
+                sp['embedding'] = new_emb_list
+                wav_file = os.path.join(_SPEAKER_DIR, sp.get('wav_file', ''))
+                if wav_file:
+                    sf.write(wav_file, trimmed, sample_rate)
+                    print(f"[声纹] 已更新音频文件: {wav_file}")
+                break
+        _save_speakers(speakers)
+
+    def _verify_current_speaker(self) -> bool:
+        """连续对话模式中验证当前说话人是否为已注册用户
+
+        Returns:
+            bool: 验证是否通过
+        """
+        if not self._speaker_enabled:
+            return True
+
+        if self._speaker_extractor is None or self._speaker_manager is None:
+            return True  # 验证系统未就绪时允许通过，避免阻塞对话
+
+        # 合并缓冲音频
+        audio_samples = []
+        for buf in self._conv_audio_buffer:
+            audio_samples.extend(buf)
+
+        if len(audio_samples) < self._conv_buffer_max_samples // 2:
+            return True  # 音频不足，跳过验证
+
+        is_verified, name, score = _verify_speaker(
+            self._speaker_extractor,
+            self._speaker_manager,
+            audio_samples,
+            self.sample_rate
+        )
+
+        if is_verified:
+            print("[声纹] 连续对话验证通过: {} (score: {:.3f})".format(name, score))
+            if self._verified_speaker_name is None:
+                self._verified_speaker_name = name
+            elif self._verified_speaker_name != name:
+                self._verified_speaker_name = name
+                print("[声纹] 警告: 检测到说话人变更，更新验证用户")
+            return True
+        else:
+            print("[声纹] 连续对话验证失败: 陌生人声音已忽略 (score: {:.3f})".format(score))
+            self._conv_audio_buffer.clear()
             return False
 
     def _switch_assistant(self, assistant_id: str):
@@ -701,19 +892,37 @@ class VoiceAssistant:
 
     def _create_keyword_spotter(self):
         """创建关键词检测器"""
-        return sherpa_onnx.KeywordSpotter(
-            tokens=self.args.kws_tokens,
-            encoder=self.args.kws_encoder,
-            decoder=self.args.kws_decoder,
-            joiner=self.args.kws_joiner,
-            num_threads=1,
-            keywords_file=self.args.keywords_file,
-            keywords_score=self.args.keywords_score,
-            keywords_threshold=self.args.keywords_threshold,
-            max_active_paths=8,
-            num_trailing_blanks=2,
-            provider=self.args.provider,
-        )
+        try:
+            spotter = sherpa_onnx.KeywordSpotter(
+                tokens=self.args.kws_tokens,
+                encoder=self.args.kws_encoder,
+                decoder=self.args.kws_decoder,
+                joiner=self.args.kws_joiner,
+                num_threads=1,
+                keywords_file=self.args.keywords_file,
+                keywords_score=self.args.keywords_score,
+                keywords_threshold=self.args.keywords_threshold,
+                max_active_paths=8,
+                num_trailing_blanks=2,
+                provider=self.args.provider,
+            )
+            print(f"[KWS] 使用 provider: {self.args.provider}")
+            return spotter
+        except Exception as e:
+            print(f"[KWS] provider={self.args.provider} 不可用，回退到 cpu: {e}")
+            return sherpa_onnx.KeywordSpotter(
+                tokens=self.args.kws_tokens,
+                encoder=self.args.kws_encoder,
+                decoder=self.args.kws_decoder,
+                joiner=self.args.kws_joiner,
+                num_threads=1,
+                keywords_file=self.args.keywords_file,
+                keywords_score=self.args.keywords_score,
+                keywords_threshold=self.args.keywords_threshold,
+                max_active_paths=8,
+                num_trailing_blanks=2,
+                provider="cpu",
+            )
 
     def _create_recognizer(self):
         """创建语音识别器"""
@@ -796,8 +1005,20 @@ class VoiceAssistant:
             )
             print("[VAD] VAD 配置创建成功")
         except Exception as e:
-            print(f"[VAD] 创建 VAD 配置失败: {e}")
-            return recognizer, None
+            print(f"[VAD] provider={self.args.provider} 不可用，回退到 cpu: {e}")
+            vad_config = sherpa_onnx.VadModelConfig(
+                silero_vad=sherpa_onnx.SileroVadModelConfig(
+                    model=vad_model,
+                    threshold=0.1,
+                    min_silence_duration=0.3,
+                    min_speech_duration=0.1,
+                    max_speech_duration=30,
+                    window_size=512,
+                ),
+                sample_rate=16000,
+                num_threads=1,
+                provider="cpu",
+            )
 
         return recognizer, vad_config
 
@@ -857,8 +1078,20 @@ class VoiceAssistant:
             )
             print("[VAD] VAD 配置创建成功")
         except Exception as e:
-            print(f"[VAD] 创建 VAD 配置失败: {e}")
-            return recognizer, None, None
+            print(f"[VAD] provider={self.args.provider} 不可用，回退到 cpu: {e}")
+            vad_config = sherpa_onnx.VadModelConfig(
+                silero_vad=sherpa_onnx.SileroVadModelConfig(
+                    model=vad_model,
+                    threshold=0.1,
+                    min_silence_duration=0.3,
+                    min_speech_duration=0.1,
+                    max_speech_duration=30,
+                    window_size=512,
+                ),
+                sample_rate=16000,
+                num_threads=1,
+                provider="cpu",
+            )
 
         return recognizer, vad_config, None
 
@@ -976,7 +1209,7 @@ class VoiceAssistant:
 
         def _create_vad_stream():
             nonlocal vad_stream
-            if self._use_offline_asr and self.vad_config:
+            if self.vad_config:
                 try:
                     vad_stream = sherpa_onnx.VoiceActivityDetector(
                         config=self.vad_config,
@@ -984,7 +1217,7 @@ class VoiceAssistant:
                     )
                     return True
                 except Exception as e:
-                    print(f"[VAD] 创建失败: {e}")
+                    print("[VAD] 创建失败: {}".format(e))
                     return False
             return False
 
@@ -1010,8 +1243,13 @@ class VoiceAssistant:
         print("开始监听...")
         print("提示: 说出唤醒词后可进入连续对话模式")
 
-        if self._use_offline_asr:
-            _create_vad_stream()
+        # 创建 VAD 流（用于待机时轻量级语音检测）
+        vad_stream = None
+        if self.vad_config:
+            if _create_vad_stream():
+                print("[VAD] VAD 流已创建（待机预检测模式）")
+            else:
+                print("[VAD] VAD 流创建失败，待机时将不使用预检测")
 
         while not self.stop_event.is_set():
             try:
@@ -1052,6 +1290,9 @@ class VoiceAssistant:
                             # 打断整个处理流程：停止TTS + 中断OpenClaw
                             stop_tts()
                             self._interrupt_openclaw()
+                            # 保持唤醒状态，允许直接继续说话
+                            self.is_awake = True
+                            self.continuous_mode = True
                             # 重置识别器，准备接收新指令
                             recognition_stream = self.recognizer.create_stream()
                             recognition_result = ""
@@ -1092,6 +1333,21 @@ class VoiceAssistant:
                         removed = self._wake_audio_buffer.pop(0)
                         total_len -= len(removed)
 
+                    # 维护 VAD 前后缓存（最近 2 秒）
+                    self._vad_buffer.append(samples.tolist())
+                    vad_total = sum(len(b) for b in self._vad_buffer)
+                    while vad_total > self._vad_buffer_max_samples:
+                        self._vad_buffer.pop(0)
+                        vad_total = sum(len(b) for b in self._vad_buffer)
+
+                    # VAD 检测：有语音时才继续处理，抑制非人声（如电脑播放的人声/TTS）
+                    vad_has_speech = False
+                    if vad_stream is not None:
+                        vad_stream.accept_waveform(samples)
+                        if vad_stream.is_speech_detected():
+                            vad_has_speech = True
+
+                    # KWS 实时检测
                     keyword_stream.accept_waveform(self.sample_rate, samples)
 
                     while self.keyword_spotter.is_ready(keyword_stream):
@@ -1116,6 +1372,12 @@ class VoiceAssistant:
                                 self._clear_queue()
                                 continue
 
+                            # VAD 前置过滤：KWS 检测到候选唤醒词时，用 VAD 确认是否有真实语音
+                            if vad_stream is not None and not vad_has_speech:
+                                self.keyword_spotter.reset_stream(keyword_stream)
+                                keyword_stream = self.keyword_spotter.create_stream()
+                                continue
+
                             print(f"\n检测到唤醒词: {result}")
 
                             # ── 声纹验证 ──────────────────────────────────────
@@ -1130,13 +1392,14 @@ class VoiceAssistant:
                                 is_verified = self._verify_speaker_on_wake(wake_samples, self.sample_rate)
                                 if not is_verified:
                                     print("[声纹] 唤醒被拒绝: 未通过声纹验证")
-                                    _notify_speaker_rejected()
+                                    # 异步发送通知，避免 2 秒 connect 超时阻塞主循环
+                                    threading.Thread(target=_notify_speaker_rejected, daemon=True).start()
                                     self._wake_audio_buffer.clear()
                                     self.keyword_spotter.reset_stream(keyword_stream)
                                     print("[声纹] 继续监听...")
                                     continue
                                 self._wake_audio_buffer.clear()
-                                self._wake_audio_buffer.clear()
+                                self._speaker_verified = True  # 标记唤醒者已通过声纹验证
 
                             # 识别是哪个 assistant 的唤醒词，并切换
                             detected_assistant_id = self._detect_assistant_from_keyword(
@@ -1177,8 +1440,6 @@ class VoiceAssistant:
                                 audio_buffer = []
                                 speech_started = False
 
-                            import threading
-
                             self.visual.show_wake_effect()
                             self._suppress_recognition_until_tts_done = True
                             self._tts_start_time = time.time()
@@ -1204,14 +1465,21 @@ class VoiceAssistant:
                             for _ in range(20):
                                 self._clear_queue()
                             continue
-                    else:
-                        if not self.is_awake:
-                            continue
+                    if not self.is_awake:
+                        continue
 
                 else:
                     # 已唤醒且不在处理中，正常处理语音识别
                     if recognition_stream is None:
                         recognition_stream = self.recognizer.create_stream()
+
+                    # 持续缓冲音频用于声纹渐进更新
+                    self._conv_audio_buffer.append(samples.tolist())
+                    conv_total = sum(len(b) for b in self._conv_audio_buffer)
+                    while conv_total > self._conv_buffer_max_samples:
+                        removed = self._conv_audio_buffer.pop(0)
+                        conv_total -= len(removed)
+
                     recognition_stream.accept_waveform(self.sample_rate, samples)
 
                     while self.recognizer.is_ready(recognition_stream):
@@ -1241,9 +1509,13 @@ class VoiceAssistant:
                         )
                     )
                     if _early_exit:
-                        print(f"\n收到退出指令（延时1s执行）: {_early_recog}")
-                        time.sleep(1.0)
-                        self.exit_standby(instant=_is_instant_exit(_early_recog))
+                        _is_instant = _is_instant_exit(_early_recog)
+                        if _is_instant:
+                            print(f"\n收到退出指令（立即执行）: {_early_recog}")
+                        else:
+                            print(f"\n收到退出指令（延时1s执行）: {_early_recog}")
+                            time.sleep(1.0)
+                        self.exit_standby(instant=_is_instant)
                         recognition_result = ""
                         recognition_stream = self.recognizer.create_stream()
                         stop_audio_stream()
@@ -1267,7 +1539,7 @@ class VoiceAssistant:
                         continue
 
                     if self.recognizer.is_endpoint(recognition_stream) or (
-                        recognition_result and silence_duration > 3.0
+                        recognition_result and silence_duration > 1.5
                     ):
                         if recognition_result:
                             should_suppress = self._suppress_recognition_until_tts_done
@@ -1358,7 +1630,8 @@ class VoiceAssistant:
                                 recognition_stream = self.recognizer.create_stream()
                                 print("\n请继续说出指令...")
                             else:
-                                self.visual.hide_effects()
+                                if not self._is_openclaw_busy:
+                                    self.visual.hide_effects()
                                 self.visual.clear_texts()
                                 self.is_awake = False
                                 self.continuous_mode = False
@@ -1369,7 +1642,8 @@ class VoiceAssistant:
                             if self.continuous_mode:
                                 recognition_stream = self.recognizer.create_stream()
                             else:
-                                self.visual.hide_effects()
+                                if not self._is_openclaw_busy:
+                                    self.visual.hide_effects()
                                 self.visual.clear_texts()
                                 self.is_awake = False
                                 print("\n请说出唤醒词来激活...")
@@ -1416,6 +1690,7 @@ class VoiceAssistant:
         # 立即重置状态，确保可以重新唤醒
         self._is_openclaw_busy = False
         self._is_processing = False
+        self.continuous_mode = False
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         # 停止 TTS 播放
@@ -1432,6 +1707,7 @@ class VoiceAssistant:
         self._stop_openclaw_request.set()
         self._is_openclaw_busy = False
         self._is_processing = False
+        self.continuous_mode = False
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         stop_tts()
@@ -1602,10 +1878,11 @@ class VoiceAssistant:
         self.visual.hide_effects()
         self.is_awake = False
         self.continuous_mode = False
-        if not instant:
-            play_prebuilt_voice("exit", _random_exit_line())
-            while is_tts_playing():
-                time.sleep(0.05)
+        self._verified_speaker_name = None
+        self._conv_audio_buffer.clear()
+        play_prebuilt_voice("exit", _random_exit_line())
+        while is_tts_playing():
+            time.sleep(0.05)
         self._clear_queue()
         # 通知主循环重置 keyword_stream 和 audio_stream
         self._keyword_stream_reset_event.set()
@@ -1617,12 +1894,17 @@ class VoiceAssistant:
         """重启语音助手：执行 start.sh 或 start.bat 脚本"""
         print("\n[重启] 检测到重启指令，正在重启语音助手...")
 
-        # 停止当前助手
+        self._interrupt_openclaw_silent()
+        self.is_awake = False
+        self.continuous_mode = False
+        self._verified_speaker_name = None
+        self._conv_audio_buffer.clear()
+        self._clear_queue()
         self.stop_event.set()
 
-        # 确定项目根目录和脚本路径
         import subprocess
         import platform
+        import os
         from pathlib import Path
 
         project_dir = Path(__file__).parent.parent
@@ -1641,7 +1923,6 @@ class VoiceAssistant:
 
         try:
             if is_windows:
-                # Windows 上使用 cmd 执行 bat 脚本
                 subprocess.Popen(
                     ["cmd", "/c", "start", "/b", str(script_path)],
                     cwd=str(project_dir),
@@ -1649,13 +1930,14 @@ class VoiceAssistant:
                     | subprocess.DETACHED_PROCESS,
                 )
             else:
-                # macOS/Linux 上执行 sh 脚本
                 subprocess.Popen(
                     ["bash", str(script_path)],
                     cwd=str(project_dir),
                     start_new_session=True,
                 )
-            print("[重启] 重启进程已启动，当前实例即将退出。")
+            print("[重启] 重启进程已启动，当前实例退出。")
+            time.sleep(0.3)
+            os._exit(0)
         except Exception as e:
             print(f"[重启] 执行重启脚本失败: {e}")
 
@@ -1788,7 +2070,7 @@ def get_args():
     )
     parser.add_argument("--hotwords-score", type=float, default=1.5)
 
-    parser.add_argument("--provider", type=str, default="cpu")
+    parser.add_argument("--provider", type=str, default=_detect_best_provider())
 
     return parser.parse_args()
 

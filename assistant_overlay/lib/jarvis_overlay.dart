@@ -556,14 +556,15 @@ class JarvisAgentVisual implements AgentVisual {
       _isSpeaking = false;
       _isHiding = true;
       print('Set effect to: hide');
-      // 监听动画状态，等待完成后清除消息
+      // 立即清空消息，不依赖动画回调
+      _userMessages.clear();
+      _aiMessages.clear();
+      _currentUserText = '';
+      _currentAiText = '';
+      // 监听动画状态，动画完成后重置 _isHiding
       void onComplete(AnimationStatus status) {
         if (status == AnimationStatus.dismissed && _isHiding) {
           _ringOpacityController.removeStatusListener(onComplete);
-          _userMessages.clear();
-          _aiMessages.clear();
-          _currentUserText = '';
-          _currentAiText = '';
           _isHiding = false;
         }
       }
