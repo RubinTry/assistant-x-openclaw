@@ -318,7 +318,7 @@ def _apply_assistant_config(cfg: dict):
 
 
 def _is_instant_exit(text: str) -> bool:
-    return text in INSTANT_EXIT_KEYWORDS or any(kw in text for kw in INSTANT_EXIT_FUZZY)
+    return text in INSTANT_EXIT_KEYWORDS or text in INSTANT_EXIT_FUZZY
 
 
 # ── 唤醒 / 退出随机话术 ──────────────────────────────────────
@@ -1101,9 +1101,7 @@ class VoiceAssistant:
             return True
 
         _recog = recognition_result.strip()
-        _is_exit = _recog in EXIT_KEYWORDS or any(
-            kw in _recog for kw in INSTANT_EXIT_FUZZY
-        )
+        _is_exit = _recog in EXIT_KEYWORDS or _recog in INSTANT_EXIT_FUZZY
         if _is_exit:
             print(f"收到退出指令: {recognition_result.strip()}")
             self._interrupt_openclaw()
@@ -1505,7 +1503,7 @@ class VoiceAssistant:
                         and not _recent_wake
                         and (
                             _early_recog in EXIT_KEYWORDS
-                            or any(kw in _early_recog for kw in INSTANT_EXIT_FUZZY)
+                            or _early_recog in INSTANT_EXIT_FUZZY
                         )
                     )
                     if _early_exit:
@@ -1567,7 +1565,7 @@ class VoiceAssistant:
                                 and not _recent_wake
                                 and (
                                     _recog in EXIT_KEYWORDS
-                                    or any(kw in _recog for kw in INSTANT_EXIT_FUZZY)
+                                    or _recog in INSTANT_EXIT_FUZZY
                                 )
                             )
                             if _is_exit:
