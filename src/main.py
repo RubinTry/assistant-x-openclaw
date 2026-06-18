@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import random
+import signal
 import sys
 import time
 import threading
@@ -1105,6 +1106,7 @@ class VoiceAssistant:
         if _is_exit:
             print(f"收到退出指令: {recognition_result.strip()}")
             self._interrupt_openclaw()
+            self._clear_openclaw_context()
             self.jarvis.on_exit()
             self.visual.clear_texts()
             self.visual.hide_effects()
@@ -1571,6 +1573,7 @@ class VoiceAssistant:
                             if _is_exit:
                                 print(f"收到退出指令: {recognition_result.strip()}")
                                 self._interrupt_openclaw()
+                                self._clear_openclaw_context()
                                 stop_audio_stream()
                                 self._clear_queue()
                                 self.jarvis.on_exit()
@@ -1711,6 +1714,14 @@ class VoiceAssistant:
         stop_tts()
         # 同样记录打断时间，防止误触发退出检测
         self._last_interrupt_time = time.time()
+
+    def _clear_openclaw_context(self):
+        """退下时通知 OpenClaw 清空会话上下文（异步，不阻塞）"""
+        try:
+            self.openclaw.send_clear_command()
+            print("[OpenClaw] 已发送 /clear，清空会话上下文")
+        except Exception as e:
+            print(f"[OpenClaw] 发送 /clear 失败: {e}")
 
     def _on_recognized(self, text: str):
         """识别结果 → 发送给 OpenClaw → 整体合成播报回复"""
@@ -1869,6 +1880,7 @@ class VoiceAssistant:
         print("\n[收到退下信号]")
         # 使用静默中断，避免重复发送 /stop 命令
         self._interrupt_openclaw_silent()
+        self._clear_openclaw_context()
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         self.jarvis.on_exit()
@@ -1890,6 +1902,13 @@ class VoiceAssistant:
 
     def _restart_assistant(self):
         """重启语音助手：执行 start.sh 或 start.bat 脚本"""
+        # 幂等保护：回声 / 重复识别可能在极短时间内再次触发重启，
+        # 避免拉起多个 start.sh 导致出现多个助手进程
+        if getattr(self, "_restarting", False):
+            print("[重启] 已在重启流程中，忽略重复的重启指令")
+            return
+        self._restarting = True
+
         print("\n[重启] 检测到重启指令，正在重启语音助手...")
 
         self._interrupt_openclaw_silent()
@@ -1938,6 +1957,44 @@ class VoiceAssistant:
             os._exit(0)
         except Exception as e:
             print(f"[重启] 执行重启脚本失败: {e}")
+
+
+def _enforce_single_instance():
+    """启动时确保只有一个实例：杀掉 PID 文件中记录的其它存活实例。
+
+    重启竞态下可能并发拉起多个 main.py，此处兜底收敛到单个进程。
+    """
+    try:
+        if not os.path.exists(PID_FILE):
+            return
+        with open(PID_FILE, encoding="utf-8") as f:
+            content = f.read().strip()
+        old_pid = int(content) if content else 0
+    except (ValueError, OSError):
+        return
+
+    if old_pid <= 0 or old_pid == os.getpid():
+        return
+
+    try:
+        os.kill(old_pid, 0)  # 探测是否存活，不存在会抛 OSError
+    except OSError:
+        return  # 旧进程已不存在
+
+    print(f"[单例] 检测到已有助手实例 PID={old_pid}，正在终止以避免重复进程...")
+    try:
+        os.kill(old_pid, signal.SIGKILL)
+    except OSError as e:
+        print(f"[单例] 终止旧实例失败: {e}")
+        return
+
+    # 等待旧实例退出（最多 ~2 秒）
+    for _ in range(20):
+        try:
+            os.kill(old_pid, 0)
+            time.sleep(0.1)
+        except OSError:
+            break
 
 
 def assert_file_exists(filename):
@@ -2126,6 +2183,7 @@ def main():
     api_thread.start()
     print(f"API server started on port {API_PORT}")
 
+    _enforce_single_instance()
     with open(PID_FILE, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 

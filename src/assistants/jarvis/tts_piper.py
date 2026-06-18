@@ -26,6 +26,9 @@ MODEL_DIR = os.path.join(
 MODEL_PATH = os.path.join(MODEL_DIR, "jarvis-high.onnx")
 CONFIG_PATH = os.path.join(MODEL_DIR, "jarvis-high.onnx.json")
 
+# 语速控制：length_scale 越小语速越快。模型默认 1.15，这里略微调快一点点。
+LENGTH_SCALE = 1.05
+
 _voice = None
 
 
@@ -61,9 +64,12 @@ def _trim_silence(audio_samples, sample_rate, threshold=0.003, keep_ms=200):
 
 def _synthesize_raw(text: str) -> tuple[np.ndarray, int] | None:
     """合成文本为 float32 音频数组"""
+    from piper import SynthesisConfig
+
     voice = _create_voice()
+    syn_config = SynthesisConfig(length_scale=LENGTH_SCALE)
     all_audio = []
-    for chunk in voice.synthesize(text):
+    for chunk in voice.synthesize(text, syn_config=syn_config):
         all_audio.append(chunk.audio_float_array)
 
     if not all_audio:
