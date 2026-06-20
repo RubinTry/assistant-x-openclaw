@@ -16,8 +16,13 @@ class HomePageState extends State<HomePage> {
   final _service = ServiceFactory.voiceAssistantService;
   final _permissionService = ServiceFactory.permissionService;
   final _logs = <LogEntry>[];
+  // 日志上限：只保留最近 N 行，超出时丢弃最旧的，防止无限增长导致内存与重排开销膨胀
+  static const int _maxLogs = 1000;
   final _scrollController = ScrollController();
   bool _isRunning = false;
+  // 「假全选」标志：虚拟化下无法原生选中屏幕外的行，改为给每一行渲染时刷选中底色。
+  // 因底色在 itemBuilder 里按此标志绘制，滚动到任意行都是高亮的，视觉上等同全选。
+  bool _allSelected = false;
   ServerSocket? _tcpServer;
   static const int _speakerRejectedPort = 18792;
 
@@ -28,6 +33,9 @@ class HomePageState extends State<HomePage> {
     _service.outputStream.listen((msg) {
       setState(() {
         _logs.add(LogEntry(timestamp: DateTime.now(), message: msg));
+        if (_logs.length > _maxLogs) {
+          _logs.removeRange(0, _logs.length - _maxLogs);
+        }
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
@@ -119,7 +127,30 @@ class HomePageState extends State<HomePage> {
   }
 
   void _clearConsole() {
-    setState(() => _logs.clear());
+    setState(() {
+      _logs.clear();
+      _allSelected = false;
+    });
+  }
+
+  /// 全选（Cmd/Ctrl+A）：仅置高亮标志，让每行渲染时刷选中底色。
+  void _selectAllLogs() {
+    if (_logs.isEmpty || _allSelected) return;
+    setState(() => _allSelected = true);
+  }
+
+  /// 取消选中（点击控制台或 Esc）。
+  void _clearSelection() {
+    if (!_allSelected) return;
+    setState(() => _allSelected = false);
+  }
+
+  /// 复制（Cmd/Ctrl+C）：仅在已全选时，把完整日志缓冲拷进剪贴板。
+  void _copySelectedLogs() {
+    if (!_allSelected || _logs.isEmpty) return;
+    final text =
+        _logs.map((log) => '[${log.formattedTimestamp}] ${log.message}').join('\n');
+    Clipboard.setData(ClipboardData(text: text));
   }
 
   void handleTrayAction(String action) {
@@ -151,11 +182,20 @@ class HomePageState extends State<HomePage> {
       shortcuts: {
         LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyR): StartIntent(),
         LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyS): StopIntent(),
+        // 全选 / 复制 / 取消选中：macOS 用 Cmd，Windows/Linux 用 Ctrl
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyA): SelectAllLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyA): SelectAllLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyC): CopyLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyC): CopyLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.escape): ClearSelectionIntent(),
       },
       child: Actions(
         actions: {
           StartIntent: CallbackAction<StartIntent>(onInvoke: (_) { if (!_isRunning) _start(); return null; }),
           StopIntent: CallbackAction<StopIntent>(onInvoke: (_) { if (_isRunning) _stop(); return null; }),
+          SelectAllLogsIntent: CallbackAction<SelectAllLogsIntent>(onInvoke: (_) { _selectAllLogs(); return null; }),
+          CopyLogsIntent: CallbackAction<CopyLogsIntent>(onInvoke: (_) { _copySelectedLogs(); return null; }),
+          ClearSelectionIntent: CallbackAction<ClearSelectionIntent>(onInvoke: (_) { _clearSelection(); return null; }),
         },
         child: Focus(
           autofocus: true,
@@ -293,16 +333,28 @@ class HomePageState extends State<HomePage> {
                       style: TextStyle(color: Colors.grey.shade600),
                     ),
                   )
-                : SingleChildScrollView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    child: SelectableText(
-                      _logs.map((log) => '[${log.formattedTimestamp}] ${log.message}').join('\n'),
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        color: Color(0xFFE0E0E0),
-                      ),
+                : GestureDetector(
+                    // 点击控制台空白处取消「全选」高亮
+                    onTap: _clearSelection,
+                    behavior: HitTestBehavior.opaque,
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _logs.length,
+                      itemBuilder: (context, index) {
+                        final log = _logs[index];
+                        return Container(
+                          color: _allSelected ? const Color(0x553B82F6) : null,
+                          child: Text(
+                            '[${log.formattedTimestamp}] ${log.message}',
+                            style: const TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              color: Color(0xFFE0E0E0),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
           ),
@@ -314,3 +366,6 @@ class HomePageState extends State<HomePage> {
 
 class StartIntent extends Intent {}
 class StopIntent extends Intent {}
+class SelectAllLogsIntent extends Intent {}
+class CopyLogsIntent extends Intent {}
+class ClearSelectionIntent extends Intent {}

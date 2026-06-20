@@ -393,4 +393,9 @@ class LinMeimeiPet implements AgentVisual {
     _leftTerminalSlideController.dispose();
     _rightTerminalSlideController.dispose();
   }
+
+  @override
+  Widget buildOtherOne(BuildContext context, double screenWidth, double screenHeight) {
+    return SizedBox();
+  }
 }
