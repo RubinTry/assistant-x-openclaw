@@ -1,6 +1,9 @@
 # assistant_overlay
 
-jarvis特效
+贾维斯 HUD 透明窗口与粒子动态特效。
+
+> 粒子特效的序列帧位于 `assets/jarvis/`（约 376MB，由仓库根目录的 Git LFS 统一管理）。
+> 若该目录里是文本指针而非真实 PNG，请在仓库根执行 `git lfs pull` 后再构建，否则特效缺帧或无法显示。
 
 ## Getting Started
 
