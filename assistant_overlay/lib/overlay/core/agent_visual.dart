@@ -29,12 +29,13 @@ abstract class AgentVisual {
   Widget buildAiTerminal(
       BuildContext context, double screenWidth, double screenHeight);
 
+  /// 构建工具调用终端区 — 展示正在调用的工具（右上角）
+  Widget buildToolCallTerminal(
+      BuildContext context, double screenWidth, double screenHeight);
+
   /// 构建特效区 — Canvas 动画、桌宠等各 Agent 自行发挥的区域
   Widget buildEffects(
       BuildContext context, double screenWidth, double screenHeight);
-
-  ///构建其他组件
-  Widget buildOtherOne(BuildContext context, double screenWidth, double screenHeight);
 
 
   /// 释放资源

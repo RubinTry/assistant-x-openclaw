@@ -2,7 +2,8 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'agent_visual.dart';
+
+import '../core/agent_visual.dart';
 
 class OrbRenderer extends StatefulWidget {
   final double time;
@@ -395,7 +396,11 @@ class LinMeimeiPet implements AgentVisual {
   }
 
   @override
-  Widget buildOtherOne(BuildContext context, double screenWidth, double screenHeight) {
-    return SizedBox();
+  Widget buildToolCallTerminal(
+    BuildContext context,
+    double screenWidth,
+    double screenHeight,
+  ) {
+    return const SizedBox.shrink();
   }
 }

@@ -137,6 +137,42 @@ class OpenClawBridge:
             # 发送完成后重置标志，允许下次发送
             self._stop_sending = False
 
+    def send_clear_command(self) -> bool:
+        """发送 /clear 命令清空 OpenClaw 会话上下文（异步，不阻塞）"""
+        if not self.token:
+            logger.error("Gateway token 不可用")
+            return False
+        threading.Thread(target=self._send_clear_sync, daemon=True).start()
+        return True
+
+    def _send_clear_sync(self):
+        """同步发送 /clear（内部用）"""
+        try:
+            resp = requests.post(
+                f"{self.gateway_url}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Content-Type": "application/json",
+                    "x-openclaw-agent-id": self.agent_id,
+                    "x-openclaw-session-key": f"agent:{self.agent_id}:{self.agent_id}",
+                },
+                json={
+                    "model": "openclaw",
+                    "messages": [{"role": "user", "content": "/clear"}],
+                },
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                logger.info("已发送 /clear 命令")
+            else:
+                logger.warning(f"发送 /clear 失败: HTTP {resp.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning("发送 /clear 命令超时 (8s)，Gateway 可能仍在处理")
+        except requests.exceptions.ConnectionError:
+            logger.warning("无法连接到 Gateway，连接被拒绝或网关未启动")
+        except Exception as e:
+            logger.error(f"发送 /clear 异常: {e}")
+
     def _run_precheck(self):
         try:
             resp = requests.get(

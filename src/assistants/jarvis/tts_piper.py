@@ -26,6 +26,17 @@ MODEL_DIR = os.path.join(
 MODEL_PATH = os.path.join(MODEL_DIR, "jarvis-high.onnx")
 CONFIG_PATH = os.path.join(MODEL_DIR, "jarvis-high.onnx.json")
 
+# 语速控制：length_scale 越小语速越快。模型默认 1.15，这里略微调快一点点。
+LENGTH_SCALE = 1.05
+
+# 下游各播放出口（main.py 回复播报、synthesize_streaming、文件播放）统一以
+# 约 1.5 倍增益播放。Piper(jarvis) 模型输出本身接近满幅（峰值≈1.0），直接 ×1.5
+# 会硬削波产生明显杂音。下面在合成阶段先按峰值缩小、为下游增益预留 headroom，
+# 使 ×PLAYBACK_GAIN 后峰值≈TARGET_PEAK 而不削波，再对个别尖峰做软限幅兜底。
+PLAYBACK_GAIN = 1.5  # 与下游播放端的增益保持一致
+TARGET_PEAK = 0.97   # 期望下游放大后的峰值上限（<1.0，留削波余量）
+SOFT_KNEE = 0.95     # 下游放大后超过此值的样本做 tanh 软压缩
+
 _voice = None
 
 
@@ -59,11 +70,44 @@ def _trim_silence(audio_samples, sample_rate, threshold=0.003, keep_ms=200):
     return audio_samples[:last_idx]
 
 
+def _normalize_for_playback(audio: np.ndarray) -> np.ndarray:
+    """为下游固定增益播放预留 headroom，避免 ×PLAYBACK_GAIN 后削波。
+
+    1. 按峰值缩小，使下游放大后峰值≈TARGET_PEAK；
+    2. 对个别仍可能越界的尖峰，在「最终播放域」以 SOFT_KNEE 为膝点做 tanh 软压缩
+       （阈值以下保持线性、不失真），膝点折算回当前域处理。
+    """
+    if len(audio) == 0:
+        return audio
+
+    peak = float(np.max(np.abs(audio)))
+    if peak < 1e-6:
+        return audio
+
+    audio = audio * (TARGET_PEAK / PLAYBACK_GAIN / peak)
+
+    # 软限幅：当前域上限 = 播放域 1.0 / PLAYBACK_GAIN，膝点 = SOFT_KNEE / PLAYBACK_GAIN
+    limit = SOFT_KNEE / PLAYBACK_GAIN
+    ceil = 1.0 / PLAYBACK_GAIN
+    span = ceil - limit
+    abs_audio = np.abs(audio)
+    over = abs_audio > limit
+    if span > 1e-6 and np.any(over):
+        sign = np.sign(audio[over])
+        excess = abs_audio[over] - limit
+        audio[over] = sign * (limit + span * np.tanh(excess / span))
+
+    return audio.astype(np.float32)
+
+
 def _synthesize_raw(text: str) -> tuple[np.ndarray, int] | None:
     """合成文本为 float32 音频数组"""
+    from piper import SynthesisConfig
+
     voice = _create_voice()
+    syn_config = SynthesisConfig(length_scale=LENGTH_SCALE)
     all_audio = []
-    for chunk in voice.synthesize(text):
+    for chunk in voice.synthesize(text, syn_config=syn_config):
         all_audio.append(chunk.audio_float_array)
 
     if not all_audio:
@@ -72,6 +116,7 @@ def _synthesize_raw(text: str) -> tuple[np.ndarray, int] | None:
     audio = np.concatenate(all_audio)
     sr = voice.config.sample_rate
     audio = _trim_silence(audio, sr)
+    audio = _normalize_for_playback(audio)
     return (audio, sr)
 
 

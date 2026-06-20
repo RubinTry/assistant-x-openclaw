@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import random
+import signal
 import sys
 import time
 import threading
@@ -102,6 +103,7 @@ from tts import (
     set_tts,
 )
 from openclaw_bridge import get_bridge
+from log_setup import setup_logging
 from assistants import (
     AssistantManager,
     AssistantInstance,
@@ -318,7 +320,7 @@ def _apply_assistant_config(cfg: dict):
 
 
 def _is_instant_exit(text: str) -> bool:
-    return text in INSTANT_EXIT_KEYWORDS or any(kw in text for kw in INSTANT_EXIT_FUZZY)
+    return text in INSTANT_EXIT_KEYWORDS or text in INSTANT_EXIT_FUZZY
 
 
 # ── 唤醒 / 退出随机话术 ──────────────────────────────────────
@@ -1101,12 +1103,11 @@ class VoiceAssistant:
             return True
 
         _recog = recognition_result.strip()
-        _is_exit = _recog in EXIT_KEYWORDS or any(
-            kw in _recog for kw in INSTANT_EXIT_FUZZY
-        )
+        _is_exit = _recog in EXIT_KEYWORDS or _recog in INSTANT_EXIT_FUZZY
         if _is_exit:
             print(f"收到退出指令: {recognition_result.strip()}")
             self._interrupt_openclaw()
+            self._clear_openclaw_context()
             self.jarvis.on_exit()
             self.visual.clear_texts()
             self.visual.hide_effects()
@@ -1293,6 +1294,9 @@ class VoiceAssistant:
                             # 保持唤醒状态，允许直接继续说话
                             self.is_awake = True
                             self.continuous_mode = True
+                            # 打断后重置空闲计时：否则 silence_duration 仍是打断前
+                            # 的陈旧值（任务可能已执行数十秒），会立即触发 30s 空闲超时退出
+                            self.last_voice_time = time.time()
                             # 重置识别器，准备接收新指令
                             recognition_stream = self.recognizer.create_stream()
                             recognition_result = ""
@@ -1505,7 +1509,7 @@ class VoiceAssistant:
                         and not _recent_wake
                         and (
                             _early_recog in EXIT_KEYWORDS
-                            or any(kw in _early_recog for kw in INSTANT_EXIT_FUZZY)
+                            or _early_recog in INSTANT_EXIT_FUZZY
                         )
                     )
                     if _early_exit:
@@ -1528,7 +1532,14 @@ class VoiceAssistant:
                     silence_duration = current_time - self.last_voice_time
                     idle_duration = current_time - self.last_activity_time
 
-                    if self.continuous_mode and silence_duration > self.idle_timeout:
+                    if (
+                        self.continuous_mode
+                        and silence_duration > self.idle_timeout
+                        # 任务执行中（OpenClaw 请求/TTS 播报）不计空闲超时，
+                        # 防止线程标志设置窗口或回复延迟期间被误判待机
+                        and not self._is_processing
+                        and not self._is_openclaw_busy
+                    ):
                         print(
                             f"\n连续对话超时（{self.idle_timeout}秒无活动），自动退出"
                         )
@@ -1567,12 +1578,13 @@ class VoiceAssistant:
                                 and not _recent_wake
                                 and (
                                     _recog in EXIT_KEYWORDS
-                                    or any(kw in _recog for kw in INSTANT_EXIT_FUZZY)
+                                    or _recog in INSTANT_EXIT_FUZZY
                                 )
                             )
                             if _is_exit:
                                 print(f"收到退出指令: {recognition_result.strip()}")
                                 self._interrupt_openclaw()
+                                self._clear_openclaw_context()
                                 stop_audio_stream()
                                 self._clear_queue()
                                 self.jarvis.on_exit()
@@ -1714,6 +1726,14 @@ class VoiceAssistant:
         # 同样记录打断时间，防止误触发退出检测
         self._last_interrupt_time = time.time()
 
+    def _clear_openclaw_context(self):
+        """退下时通知 OpenClaw 清空会话上下文（异步，不阻塞）"""
+        try:
+            self.openclaw.send_clear_command()
+            print("[OpenClaw] 已发送 /clear，清空会话上下文")
+        except Exception as e:
+            print(f"[OpenClaw] 发送 /clear 失败: {e}")
+
     def _on_recognized(self, text: str):
         """识别结果 → 发送给 OpenClaw → 整体合成播报回复"""
         print(f"\n[→ OpenClaw] {text}")
@@ -1733,6 +1753,80 @@ class VoiceAssistant:
             import queue
 
             result_queue = queue.Queue()
+
+            # ── 增量 TTS：边收边按句朗读（串行队列）──────────────────────
+            # OpenClaw 流式输出时：遇句末标点即把整句送入朗读队列；若超过
+            # _TTS_DEBOUNCE_SEC 无新输出，则把缓冲内容也送入队列（应对无标点的
+            # 停顿，如等待工具调用）。朗读队列由单独线程串行消费，逐句合成播放，
+            # 从而把"等整段说完"降到"等第一句"。
+            from tts import _tts_playing
+
+            _TTS_DEBOUNCE_SEC = 1.5
+            _TTS_SENT_END = "。！？!?；;…\n"
+
+            tts_queue = queue.Queue()
+            tts_buf = {"text": "", "last": time.time()}
+            tts_buf_lock = threading.Lock()
+            tts_threads_stop = threading.Event()
+
+            def _flush_segment(force=False):
+                """把缓冲里的完整句子（force 时为剩余全部）送入朗读队列。"""
+                with tts_buf_lock:
+                    buf = tts_buf["text"]
+                    if not buf:
+                        return
+                    if force:
+                        seg, tts_buf["text"] = buf, ""
+                    else:
+                        idx = max(
+                            (buf.rfind(c) for c in _TTS_SENT_END), default=-1
+                        )
+                        if idx < 0:
+                            return
+                        seg, tts_buf["text"] = buf[: idx + 1], buf[idx + 1 :]
+                seg = _clean_for_tts(seg)
+                if seg.strip():
+                    tts_queue.put(seg)
+
+            def _tts_worker():
+                import sounddevice as sd
+
+                while True:
+                    seg = tts_queue.get()
+                    if seg is None:
+                        break
+                    if self._stop_openclaw_request.is_set():
+                        continue  # 已打断：排空队列但不播放
+                    result = self.tts.synthesize_to_array(seg)
+                    if not result or self._stop_openclaw_request.is_set():
+                        continue
+                    audio_data, sr = result
+                    _tts_playing.set()
+                    sd.play(audio_data * 1.5, samplerate=sr)
+                    # 可中断地等待播完：打断时立即停掉当前句
+                    deadline = time.time() + len(audio_data) / float(sr) + 0.1
+                    while time.time() < deadline:
+                        if self._stop_openclaw_request.is_set():
+                            sd.stop()
+                            break
+                        time.sleep(0.05)
+
+            def _tts_flusher():
+                """监控停顿：缓冲非空且超过 debounce 无新输出则触发朗读。"""
+                while not tts_threads_stop.is_set():
+                    time.sleep(0.15)
+                    if self._stop_openclaw_request.is_set():
+                        return
+                    with tts_buf_lock:
+                        has = bool(tts_buf["text"].strip())
+                        idle = time.time() - tts_buf["last"]
+                    if has and idle >= _TTS_DEBOUNCE_SEC:
+                        _flush_segment(force=True)
+
+            tts_worker_thread = threading.Thread(target=_tts_worker, daemon=True)
+            tts_flusher_thread = threading.Thread(target=_tts_flusher, daemon=True)
+            tts_worker_thread.start()
+            tts_flusher_thread.start()
 
             def _openclaw_request():
                 self._waiting_active = threading.Event()
@@ -1770,6 +1864,11 @@ class VoiceAssistant:
                     full_text = "".join(received_chunks)
                     print(chunk, end="", flush=True)
                     self.visual.show_ai_text(full_text)
+                    # 累积到朗读缓冲，遇句末标点立即切句入队
+                    with tts_buf_lock:
+                        tts_buf["text"] += chunk
+                        tts_buf["last"] = time.time()
+                    _flush_segment(force=False)
 
                 def _on_stream_end():
                     if not stop_requested.is_set():
@@ -1810,27 +1909,17 @@ class VoiceAssistant:
                 reply = data
                 if reply:
                     print()
-                    # 整体合成播放
-                    cleaned = _clean_for_tts(reply)
-                    if cleaned:
-                        from tts import _tts_playing
+                    # 流已结束：停止停顿监控，把剩余缓冲全部入队，再等队列逐句播完
+                    tts_threads_stop.set()
+                    if not self._stop_openclaw_request.is_set():
+                        _flush_segment(force=True)
+                    tts_queue.put(None)
+                    tts_worker_thread.join()
 
-                        _tts_playing.set()
-                        try:
-                            result = self.tts.synthesize_to_array(cleaned)
-                            if result and not self._stop_openclaw_request.is_set():
-                                import sounddevice as sd
-
-                                audio_data, sample_rate = result
-                                sd.play(audio_data * 1.5, samplerate=sample_rate)
-                                sd.wait()
-                        finally:
-                            _tts_playing.clear()
-
-                        # TTS播报结束，检查是否被中断
-                        if self._stop_openclaw_request.is_set():
-                            print("\n[打断] TTS播报被中断，跳过收尾音效")
-                            return
+                    # TTS播报结束，检查是否被中断
+                    if self._stop_openclaw_request.is_set():
+                        print("\n[打断] TTS播报被中断，跳过收尾音效")
+                        return
 
                     print("◈ 继续说吧，我在听着...", flush=True)
                     self.jarvis.play_sound("continue")
@@ -1842,6 +1931,13 @@ class VoiceAssistant:
                 print(f"[OpenClaw] 异常: {data}")
                 self.jarvis.on_error(data)
         finally:
+            # 兜底停掉增量 TTS 线程与残留播放（打断/异常/无回复路径）
+            try:
+                tts_threads_stop.set()
+                tts_queue.put(None)
+                _tts_playing.clear()
+            except Exception:
+                pass
             self.last_voice_time = time.time()
             self._is_processing = False
             self._is_openclaw_busy = False
@@ -1871,6 +1967,7 @@ class VoiceAssistant:
         print("\n[收到退下信号]")
         # 使用静默中断，避免重复发送 /stop 命令
         self._interrupt_openclaw_silent()
+        self._clear_openclaw_context()
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         self.jarvis.on_exit()
@@ -1892,6 +1989,13 @@ class VoiceAssistant:
 
     def _restart_assistant(self):
         """重启语音助手：执行 start.sh 或 start.bat 脚本"""
+        # 幂等保护：回声 / 重复识别可能在极短时间内再次触发重启，
+        # 避免拉起多个 start.sh 导致出现多个助手进程
+        if getattr(self, "_restarting", False):
+            print("[重启] 已在重启流程中，忽略重复的重启指令")
+            return
+        self._restarting = True
+
         print("\n[重启] 检测到重启指令，正在重启语音助手...")
 
         self._interrupt_openclaw_silent()
@@ -1940,6 +2044,44 @@ class VoiceAssistant:
             os._exit(0)
         except Exception as e:
             print(f"[重启] 执行重启脚本失败: {e}")
+
+
+def _enforce_single_instance():
+    """启动时确保只有一个实例：杀掉 PID 文件中记录的其它存活实例。
+
+    重启竞态下可能并发拉起多个 main.py，此处兜底收敛到单个进程。
+    """
+    try:
+        if not os.path.exists(PID_FILE):
+            return
+        with open(PID_FILE, encoding="utf-8") as f:
+            content = f.read().strip()
+        old_pid = int(content) if content else 0
+    except (ValueError, OSError):
+        return
+
+    if old_pid <= 0 or old_pid == os.getpid():
+        return
+
+    try:
+        os.kill(old_pid, 0)  # 探测是否存活，不存在会抛 OSError
+    except OSError:
+        return  # 旧进程已不存在
+
+    print(f"[单例] 检测到已有助手实例 PID={old_pid}，正在终止以避免重复进程...")
+    try:
+        os.kill(old_pid, signal.SIGKILL)
+    except OSError as e:
+        print(f"[单例] 终止旧实例失败: {e}")
+        return
+
+    # 等待旧实例退出（最多 ~2 秒）
+    for _ in range(20):
+        try:
+            os.kill(old_pid, 0)
+            time.sleep(0.1)
+        except OSError:
+            break
 
 
 def assert_file_exists(filename):
@@ -2078,6 +2220,8 @@ def get_args():
 def main():
     global _assistant_instance
 
+    setup_logging(_PROJECT_DIR)
+
     args = get_args()
 
     # 加载所有 assistant 配置
@@ -2128,6 +2272,7 @@ def main():
     api_thread.start()
     print(f"API server started on port {API_PORT}")
 
+    _enforce_single_instance()
     with open(PID_FILE, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 

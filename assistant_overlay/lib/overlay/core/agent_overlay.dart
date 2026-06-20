@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import '../../tcp_server.dart';
+import '../jarvis/jarvis_overlay.dart';
+import '../linmeimei/linmeimei_overlay.dart';
+import '../xiaonu/xiaonu_overlay.dart';
 import 'agent_visual.dart';
-import 'jarvis_overlay.dart';
-import 'tcp_server.dart';
-import 'linmeimei_overlay.dart';
 
 /// Agent 特效调度器 — 根据命令切换不同 Agent 的可视化特效
 ///
@@ -44,6 +45,8 @@ class _AgentOverlayState extends State<AgentOverlay>
         setState(() {});
       },
     );
+
+    _agents['xiao-nu'] = Xiaonupet(vsync: this);
 
     print('[AgentOverlay] 所有 Agent 初始化完成');
   }
@@ -120,8 +123,8 @@ class _AgentOverlayState extends State<AgentOverlay>
           children: [
             agent.buildAiTerminal(context, screenWidth, screenHeight),
             agent.buildUserTerminal(context, screenWidth, screenHeight),
+            agent.buildToolCallTerminal(context, screenWidth, screenHeight),
             agent.buildEffects(context, screenWidth, screenHeight),
-            agent.buildOtherOne(context, screenWidth, screenHeight)
           ],
         );
       }).toList(),

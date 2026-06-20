@@ -1,11 +1,10 @@
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:assistant_overlay/jarvis_rings_windows.dart';
-import 'package:flutter/services.dart';
-import 'agent_visual.dart';
+
+import '../core/agent_visual.dart';
+import 'jarvis_rings_windows.dart';
 
 class JarvisRingsPainter extends CustomPainter {
   final double outerRingRotation;
@@ -33,7 +32,7 @@ class JarvisRingsPainter extends CustomPainter {
       case 'error':
         return const Color(0xFFFF4444);
       default:
-        return const Color(0xFF12B9FF);
+        return const Color(0xFF5FFFFF);
     }
   }
 
@@ -44,7 +43,7 @@ class JarvisRingsPainter extends CustomPainter {
       case 'error':
         return const Color(0x88FF4444);
       default:
-        return const Color(0xFF12B9FF);
+        return const Color(0x885FFFFF);
     }
   }
 
@@ -355,7 +354,7 @@ class JarvisRingsPainter extends CustomPainter {
         text: "J.A.R.V.I.S.",
         style: TextStyle(
           color: Colors.white,
-          fontSize: 16,
+          fontSize: 20,
           fontWeight: FontWeight.bold,
           letterSpacing: 2,
           shadows: [
@@ -396,6 +395,7 @@ class JarvisAgentVisual implements AgentVisual {
   JarvisAgentVisual({required this.vsync}) {
     _userScrollController = ScrollController();
     _aiScrollController = ScrollController();
+    _toolCallScrollController = ScrollController();
     _initAnimationControllers();
   }
 
@@ -434,17 +434,21 @@ class JarvisAgentVisual implements AgentVisual {
   String _currentUserText = '';
   String _currentAiText = '';
 
+  // 工具调用数据
+  String _currentToolCallText = '';
   late ScrollController _userScrollController;
   late ScrollController _aiScrollController;
+  late ScrollController _toolCallScrollController;
 
   late AnimationController _ringOpacityController;
   late AnimationController _ringScaleController;
   late AnimationController _terminalSlideController;
   late AnimationController _leftTerminalSlideController;
   late AnimationController _rightTerminalSlideController;
+  late AnimationController _toolCallTerminalSlideController;
 
   static const Color _jarvisBlue = Color(0xFF66FFFF);
-  static const Color _terminalBackground = Color(0xFF12B9FF);
+  static const Color _terminalBackground = Color(0xFF0CDDFF);
 
   void _initAnimationControllers() {
     _outerRingController = AnimationController(
@@ -499,6 +503,12 @@ class JarvisAgentVisual implements AgentVisual {
     );
 
     _rightTerminalSlideController = AnimationController(
+      vsync: vsync,
+      duration: const Duration(milliseconds: 500),
+      value: 0.0,
+    );
+
+    _toolCallTerminalSlideController = AnimationController(
       vsync: vsync,
       duration: const Duration(milliseconds: 500),
       value: 0.0,
@@ -563,6 +573,7 @@ class JarvisAgentVisual implements AgentVisual {
       _aiMessages.clear();
       _currentUserText = '';
       _currentAiText = '';
+      _currentToolCallText = '';
       // 监听动画状态，动画完成后重置 _isHiding
       void onComplete(AnimationStatus status) {
         if (status == AnimationStatus.dismissed && _isHiding) {
@@ -581,6 +592,7 @@ class JarvisAgentVisual implements AgentVisual {
       );
       _leftTerminalSlideController.reverse();
       _rightTerminalSlideController.reverse();
+      _toolCallTerminalSlideController.reverse();
     } else if (command.startsWith('user:')) {
       final text = command.substring(5);
       // 用户讲话，从当前值平滑变到 1.1（只触发一次）
@@ -653,14 +665,28 @@ class JarvisAgentVisual implements AgentVisual {
           );
         }
       });
+    } else if (command.startsWith('tool_call_end:')) {
+      _currentToolCallText = '';
+    } else if (command.startsWith('tool_call:')) {
+      _currentToolCallText = '';
+      if (_toolCallTerminalSlideController.value == 0) {
+        _toolCallTerminalSlideController.forward();
+      }
+      _currentToolCallText = command.substring(10);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_toolCallScrollController.hasClients) {
+          _toolCallScrollController.jumpTo(
+            _toolCallScrollController.position.maxScrollExtent,
+          );
+        }
+      });
     }
   }
 
   void _updateOuterRingAngle() {
     final delta = _outerRingController.value - _lastOuterValue;
     _lastOuterValue = _outerRingController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _outerRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -671,8 +697,7 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateArcsAngle() {
     final delta = _arcsController.value - _lastArcsValue;
     _lastArcsValue = _arcsController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _arcsAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -683,8 +708,7 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateDataRingAngle() {
     final delta = _dataRingController.value - _lastDataRingValue;
     _lastDataRingValue = _dataRingController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _dataRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -695,8 +719,7 @@ class JarvisAgentVisual implements AgentVisual {
   void _updateInnerRingAngle() {
     final delta = _innerRingController.value - _lastInnerRingValue;
     _lastInnerRingValue = _innerRingController.value;
-    final speedMultiplier =
-        1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
+    final speedMultiplier = 1.0 + (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 30;
     if (delta < 0) {
       _innerRingAngle += (delta + 1.0) * speedMultiplier;
     } else {
@@ -708,6 +731,7 @@ class JarvisAgentVisual implements AgentVisual {
   void dispose() {
     _userScrollController.dispose();
     _aiScrollController.dispose();
+    _toolCallScrollController.dispose();
     _ringOpacityController.dispose();
     _ringScaleController.dispose();
     _terminalSlideController.dispose();
@@ -722,19 +746,19 @@ class JarvisAgentVisual implements AgentVisual {
 
   @override
   Widget buildAiTerminal(
-    BuildContext context,
-    double screenWidth,
-    double screenHeight,
-  ) {
+      BuildContext context,
+      double screenWidth,
+      double screenHeight,
+      ) {
     final double terminalHeight = screenHeight / 3;
 
     final leftSlide =
-        Tween<Offset>(begin: const Offset(-1.0, 0), end: Offset.zero).animate(
-          CurvedAnimation(
-            parent: _leftTerminalSlideController,
-            curve: Curves.easeOutCubic,
-          ),
-        );
+    Tween<Offset>(begin: const Offset(-1.0, 0), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _leftTerminalSlideController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
 
     return SlideTransition(
       position: leftSlide,
@@ -758,19 +782,19 @@ class JarvisAgentVisual implements AgentVisual {
 
   @override
   Widget buildUserTerminal(
-    BuildContext context,
-    double screenWidth,
-    double screenHeight,
-  ) {
+      BuildContext context,
+      double screenWidth,
+      double screenHeight,
+      ) {
     final double terminalHeight = screenHeight / 3;
 
     final rightSlide =
-        Tween<Offset>(begin: const Offset(1.0, 0), end: Offset.zero).animate(
-          CurvedAnimation(
-            parent: _rightTerminalSlideController,
-            curve: Curves.easeOutCubic,
-          ),
-        );
+    Tween<Offset>(begin: const Offset(1.0, 0), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _rightTerminalSlideController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
 
     return SlideTransition(
       position: rightSlide,
@@ -793,12 +817,90 @@ class JarvisAgentVisual implements AgentVisual {
   }
 
   @override
+  Widget buildToolCallTerminal(
+      BuildContext context,
+      double screenWidth,
+      double screenHeight,
+      ) {
+    final double terminalHeight = screenHeight / 4;
+
+    final toolCallSlide =
+        Tween<Offset>(begin: const Offset(1.0, 0), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _toolCallTerminalSlideController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+
+    return SlideTransition(
+      position: toolCallSlide,
+      child: Align(
+        alignment: Alignment.topRight,
+        child: Container(
+          margin: const EdgeInsets.only(right: 40, top: 40),
+          child: SizedBox(
+            height: terminalHeight,
+            width: 350,
+            child: _buildToolCallTerminalContent(
+              currentText: _currentToolCallText,
+              maxHeight: terminalHeight,
+              scrollController: _toolCallScrollController,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolCallTerminalContent({
+    required String currentText,
+    required double maxHeight,
+    required ScrollController scrollController,
+  }) {
+    return Container(
+      width: 350,
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      decoration: BoxDecoration(
+        color: _terminalBackground.withAlpha(100),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _jarvisBlue.withAlpha(150), width: 0),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: ListView(
+        controller: scrollController,
+        shrinkWrap: true,
+        reverse: false,
+        children: [
+          if (currentText.isNotEmpty)
+            Text(
+              currentText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            )
+          else
+            const Text(
+              '...',
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 14,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget buildEffects(
-    BuildContext context,
-    double screenWidth,
-    double screenHeight,
-  ) {
-    final size = 500.0;
+      BuildContext context,
+      double screenWidth,
+      double screenHeight,
+      ) {
+    final size = 300.0;
 
     return Center(
       child: AnimatedBuilder(
@@ -817,10 +919,44 @@ class JarvisAgentVisual implements AgentVisual {
                       return SizedBox(
                         width: size,
                         height: size,
-                        child: JarvisSequencePlayer(
-                          assetDir: 'assets/jarvis', // 只需要指定目录
-                          assetSuffix: '.png',
-                          fps: 60,
+                        child: CustomPaint(
+                          painter: Platform.isWindows
+                              ? JarvisRingsPainterWindows(
+                            outerRingRotation:
+                            (_outerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            arcsRotation:
+                            (_arcsAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            dataRingRotation:
+                            (_dataRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            innerRingRotation:
+                            (_innerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            pulseValue: _pulseController.value,
+                            currentEffect: _currentEffect,
+                            speakingScale:
+                            (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
+                          )
+                              : JarvisRingsPainter(
+                            outerRingRotation:
+                            (_outerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            arcsRotation:
+                            (_arcsAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            dataRingRotation:
+                            (_dataRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            innerRingRotation:
+                            (_innerRingAngle * 2 * math.pi) %
+                                (2 * math.pi),
+                            pulseValue: _pulseController.value,
+                            currentEffect: _currentEffect,
+                            speakingScale:
+                            (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
+                          ),
                         ),
                       );
                     },
@@ -904,222 +1040,4 @@ class JarvisAgentVisual implements AgentVisual {
       ),
     );
   }
-
-  @override
-  Widget buildOtherOne(
-    BuildContext context,
-    double screenWidth,
-    double screenHeight,
-  ) {
-    return Positioned(
-      right: 100,
-      top: 80,
-      child: AnimatedBuilder(
-        animation: _ringOpacityController,
-        builder: (context, child) {
-          return Opacity(
-            opacity: _ringOpacityController.value,
-            child: AnimatedBuilder(
-              animation: _ringScaleController,
-              builder: (context, child) {
-                return Transform.scale(
-                  scale: _ringScaleController.value,
-                  child: AnimatedBuilder(
-                    animation: _pulseController,
-                    builder: (context, child) {
-                      return SizedBox(
-                        width: 150,
-                        height: 150,
-                        child: CustomPaint(
-                          painter: Platform.isWindows
-                              ? JarvisRingsPainterWindows(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
-                                  currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
-                                )
-                              : JarvisRingsPainter(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
-                                  currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
-                                ),
-                        ),
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class JarvisSequencePlayer extends StatefulWidget {
-  final int fps;
-  final String assetDir; // 资源目录，例如: 'assets/jarvis'
-  final String assetSuffix; // 文件后缀，例如: '.png'
-
-  const JarvisSequencePlayer({
-    super.key,
-    this.fps = 60,
-    required this.assetDir,
-    this.assetSuffix = '.png',
-  });
-
-  @override
-  State<JarvisSequencePlayer> createState() => _JarvisSequencePlayerState();
-}
-
-class _JarvisSequencePlayerState extends State<JarvisSequencePlayer>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  final List<ui.Image> _cachedFrames = [];
-  List<String> _framePaths = []; // 动态获取的文件路径列表
-  bool _isLoaded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _initSequence();
-  }
-
-  // 1. 异步初始化：先动态读取文件数量，再加载图片
-  Future<void> _initSequence() async {
-    await _loadFramePaths();
-    if (_framePaths.isNotEmpty) {
-      await _decodeAllFrames();
-      // 动态计算动画时长
-      final duration = Duration(
-        milliseconds: (_framePaths.length / widget.fps * 1000).round(),
-      );
-      _controller = AnimationController(vsync: this, duration: duration)
-        ..repeat();
-      if (mounted) setState(() => _isLoaded = true);
-    }
-  }
-
-  // 2. 动态扫描目录获取文件列表（核心逻辑）
-  Future<void> _loadFramePaths() async {
-    try {
-      // 【最佳实践】：使用 DefaultAssetBundle 替代 rootBundle
-      // 这样不仅符合官方规范，还能完美兼容本地化和测试场景
-      final assetManifest = await AssetManifest.loadFromAssetBundle(
-        DefaultAssetBundle.of(context),
-      );
-      final allAssets = assetManifest.listAssets();
-
-      // 过滤出目标目录下的文件，并按文件名排序
-      _framePaths =
-          allAssets
-              .where(
-                (path) =>
-                    path.startsWith(widget.assetDir) &&
-                    path.endsWith(widget.assetSuffix),
-              )
-              .toList()
-            ..sort();
-    } catch (e) {
-      debugPrint('读取资源目录失败: $e');
-    }
-  }
-
-  // 3. 预加载解码所有帧
-  Future<void> _decodeAllFrames() async {
-    for (final path in _framePaths) {
-      try {
-        final ByteData data = await rootBundle.load(path);
-        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
-        final frame = await codec.getNextFrame();
-        _cachedFrames.add(frame.image);
-      } catch (e) {
-        debugPrint('解码帧失败: $path');
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    for (var img in _cachedFrames) {
-      img.dispose(); // 释放底层内存
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_isLoaded) return const SizedBox.shrink(); // 加载期间不占空间或显示Loading
-
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        // 动态获取总帧数，防止越界
-        final index = (_controller.value * _cachedFrames.length).floor().clamp(
-          0,
-          _cachedFrames.length - 1,
-        );
-        return CustomPaint(
-          painter: _SequencePainter(_cachedFrames[index]),
-          size: Size.infinite,
-        );
-      },
-    );
-  }
-}
-
-// 底层画布绘制器
-class _SequencePainter extends CustomPainter {
-  final ui.Image frame;
-
-  _SequencePainter(this.frame);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawImageRect(
-      frame,
-      Rect.fromLTWH(0, 0, frame.width.toDouble(), frame.height.toDouble()),
-      Offset.zero & size,
-      Paint(),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _SequencePainter oldDelegate) =>
-      oldDelegate.frame != frame;
 }
