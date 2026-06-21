@@ -198,7 +198,7 @@ class OpenClawBridge:
                         "Authorization": f"Bearer {self.token}",
                         "Content-Type": "application/json",
                     },
-                    json={"tool": tool, "args": {}, "dryRun": True},
+                    json={"name": tool, "args": {}, "dryRun": True},  # 字段名是 "name"，不是 "tool"
                     timeout=3,
                 )
                 if r.status_code == 200:

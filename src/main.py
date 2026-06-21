@@ -102,7 +102,7 @@ from tts import (
     stop_tts,
     set_tts,
 )
-from openclaw_bridge import get_bridge
+from openclaw_bridge_websocket import get_bridge
 from log_setup import setup_logging
 from assistants import (
     AssistantManager,
@@ -846,11 +846,16 @@ class VoiceAssistant:
         """初始化 OpenClaw bridge"""
         assistant_id = self.current_cfg["id"]
         if self.openclaw:
-            # 如果有旧的，先发送停止
+            # 如果有旧的，先发送停止，再关闭其 WebSocket 长连接（避免切换时连接泄漏）
             self.openclaw.send_stop_command()
-        self.openclaw = get_bridge(
-            agent_id=assistant_id.replace("-", "_"), namespace="main"
-        )
+            close = getattr(self.openclaw, "close", None)
+            if callable(close):
+                close()
+        # namespace 与 agent_id 一致 → session key = agent:<id>:<id>（如 agent:jarvis:jarvis），
+        # 与历史会话 lane 保持一致；WS 桥用 chat.abort/sessions.reset 控制面 RPC，
+        # 不再把 /stop、/clear 作为聊天消息排进同一 lane，从根上消除 "Command lane cleared"。
+        agent_id = assistant_id.replace("-", "_")
+        self.openclaw = get_bridge(agent_id=agent_id, namespace=agent_id)
         self.openclaw.precheck_async()
 
     def _detect_assistant_from_keyword(self, keyword_result: str) -> str:
