@@ -161,20 +161,19 @@ openclaw agents add lin-meimei
 
 ### 1. 克隆项目
 
-> ⚠️ **本仓库用 [Git LFS](https://git-lfs.com) 管理贾维斯粒子特效序列帧**（`assistant_overlay/assets/jarvis/`，约 376MB）。克隆前请先安装并启用 LFS，否则拉下来的只是文本指针文件，粒子特效无法构建：
+> ⚠️ **贾维斯粒子特效序列帧（`assistant_overlay/assets/jarvis/`，约 376MB / 360 帧）不在仓库内**（已从 Git 移除并 ignore，避免拖慢克隆）。请从 Release 单独下载后解压到该目录：
 >
-> ```bash
-> # macOS: brew install git-lfs ；其他平台见 https://git-lfs.com
-> git lfs install
-> ```
+> - 下载地址：https://gitee.com/rubintry/assistant-x-openclaw/releases/tag/v1.0.1
+> - 解压后确保路径为 `assistant_overlay/assets/jarvis/output_00001.png` … `output_00360.png`，否则粒子特效会缺帧或无法构建。
 
 ```bash
 mkdir -p ~/.openclaw/workspace/voice-assistant
 cd ~/.openclaw/workspace/voice-assistant
 git clone <仓库地址>
 cd assistant-x-openclaw
-git lfs pull          # 拉取 LFS 管理的粒子特效序列帧（克隆时若未自动下载）
 mkdir models
+# 粒子特效序列帧需从 Release 手动下载并解压到 assistant_overlay/assets/jarvis/
+# https://gitee.com/rubintry/assistant-x-openclaw/releases/tag/v1.0.1
 ```
 
 ### 2. 安装依赖
@@ -307,7 +306,7 @@ scripts\start.bat
 > cd assistant_overlay
 > flutter build macos --debug    # macOS
 > ```
-> 贾维斯的粒子动态特效依赖 `assistant_overlay/assets/jarvis/` 下的序列帧（由 Git LFS 管理）。构建前请确认这些帧已通过 `git lfs pull` 拉取为真实图片，否则特效会缺帧或无法显示。
+> 贾维斯的粒子动态特效依赖 `assistant_overlay/assets/jarvis/` 下的序列帧。这些帧不随仓库分发，需从 Release（https://gitee.com/rubintry/assistant-x-openclaw/releases/tag/v1.0.1）下载解压到该目录，否则特效会缺帧或无法显示。
 
 ## 使用教程
 
