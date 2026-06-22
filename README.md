@@ -168,8 +168,6 @@ cd ~/.openclaw/workspace/voice-assistant
 git clone <仓库地址>
 cd assistant-x-openclaw
 mkdir models
-# 粒子特效序列帧需从 Release 手动下载并解压到 assistant_overlay/assets/jarvis/
-# https://gitee.com/rubintry/assistant-x-openclaw/releases/tag/v1.0.1
 ```
 
 ### 2. 安装依赖
@@ -300,12 +298,6 @@ scripts\start.bat
 3. 启动 Flutter HUD 视觉特效窗口
 4. 启动语音助手主程序
 
-> **首次运行需要构建 HUD**：
-> ```bash
-> cd assistant_overlay
-> flutter build macos --debug    # macOS
-> ```
-> 贾维斯的粒子动态特效依赖 `assistant_overlay/assets/jarvis/` 下的序列帧。这些帧不随仓库分发，需从 Release（https://gitee.com/rubintry/assistant-x-openclaw/releases/tag/v1.0.1）下载解压到该目录，否则特效会缺帧或无法显示。
 
 ## 使用教程
 
