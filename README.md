@@ -283,11 +283,14 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 
 ### 6. 启动语音助手
 
-**macOS / Linux：**
+**macOS：**
 
-```bash
-./scripts/start.sh
-```
+1.请从[此处](https://modelscope.cn/datasets/rubintry/jarvis/files)下载assistant_overlay.dmg、control_center.dmg
+
+2.安装assistant_overlay.dmg和dmg、control_center.dmg
+
+3.打开「control_center」app，根据提示录入声纹后，开启语音助手，喊出贾维斯
+
 
 **Windows：**
 
