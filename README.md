@@ -161,10 +161,6 @@ openclaw agents add lin-meimei
 
 ### 1. 克隆项目
 
-> ⚠️ **贾维斯粒子特效序列帧（`assistant_overlay/assets/jarvis/`，约 376MB / 360 帧）不在仓库内**（已从 Git 移除并 ignore，避免拖慢克隆）。请从 Release 单独下载后解压到该目录：
->
-> - 下载地址：https://gitee.com/rubintry/assistant-x-openclaw/releases/tag/v1.0.1
-> - 解压后确保路径为 `assistant_overlay/assets/jarvis/output_00001.png` … `output_00360.png`，否则粒子特效会缺帧或无法构建。
 
 ```bash
 mkdir -p ~/.openclaw/workspace/voice-assistant
