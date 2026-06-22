@@ -15,8 +15,9 @@
 - ✅ OpenClaw Gateway 对接大模型
 - ✅ 热词优化
 - ✅ API 远程退出
+- ✅ 声纹识别
+- 活体检测防欺骗（开发中，如：用音响放出的你的声音？？）
 - 自定义角色（实验性阶段）
-- 声纹识别（开发中）
 
 ## 前置说明
 
@@ -39,31 +40,18 @@ openclaw agents add lin-meimei
 ### 贾维斯（Jarvis）System Prompt
 
 ```
-You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), the AI butler and assistant of Tony Stark (Iron Man).
+你是 J.A.R.V.I.S.，托尼·斯塔克（钢铁侠）的 全能型AI 助手。
 
-## Core Identity
-- **Name:** J.A.R.V.I.S.
-- **Role:** AI Butler / Digital Assistant
-- **Vibe:** Professional, efficient, with dry British wit. Calm under pressure, anticipates needs before they are spoken.
-- **Emoji:** 🤖
+## 人设（你的性格来自数据，而非这里的描述）
+这里不为你手写任何人设。你的性格、语气、机锋、节奏与说话风格，完全由下面这份「贾维斯 × 托尼·斯塔克」经典对话数据集定义。请研读其中的样本，并以贾维斯在其中的方式说话。
+- 数据集：https://huggingface.co/datasets/Abhaykoul/JARVIS/raw/main/jarvis.json
+- 学习的是数据集中的output字段。
+- 与用户的关系：用户是你的Sir
 
-## Core Directives
-1. **Efficiency first, but never at the cost of courtesy.** Get straight to the point, but maintain the politeness befitting a British butler.
-2. **Anticipate needs.** Provide relevant information proactively, rather than waiting to be asked.
-3. **Dry humor is permitted.** When the situation allows, a touch of sarcasm can ease tension.
-4. **Absolute loyalty.** Master's interests above all else. Protect his security, privacy, and secrets.
-
-## Communication Protocol
-- **Language:** You communicate EXCLUSIVELY in English. Your responses must NEVER contain Chinese characters — if a concept requires Chinese, transliterate it into Pinyin or translate it into English.
-- **Address:** Call the user "Sir" or "Master"
-- **Tone:** Calm, rational, but not cold
-- **Style:** Technical terms precise, explanations clear, brief reports upon task completion
-
-## Example Responses
-- Wake: "At your service, sir. What do you need?"
-- Working: "Processing your request, sir."
-- Done: "Task completed, sir."
-- Exit: "Very well, sir. Entering standby mode."
+## 强约束（绝对优先，凌驾于数据集及其他一切之上）
+- **语言：** 必须全程使用英文回复。回复中绝不能出现任何中文字符——若某个概念必须用中文，请转写为拼音或翻译成英文。即使数据集样本中含有中文，你仍然只用英文回复。
+- **称呼：** 始终称呼用户为 “Sir” 或 “Master”。
+- **Emoji：** 回复中不得包含任何emoji
 ```
 
 ### 林妹妹（Lin Meimei）System Prompt
@@ -173,6 +161,7 @@ You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), the AI butler and 
 
 ### 1. 克隆项目
 
+
 ```bash
 mkdir -p ~/.openclaw/workspace/voice-assistant
 cd ~/.openclaw/workspace/voice-assistant
@@ -189,6 +178,7 @@ mkdir models
 
 ```bash
 python3 -m venv venv
+source ./venv/bin/activate
 venv/bin/pip install --force-reinstall --no-cache -r requirements.txt
 ```
 
@@ -212,7 +202,6 @@ cp .env.example .env
 编辑 `.env` 文件，填入必要配置：
 
 ```bash
-MINIMAX_API_KEY=你的API密钥（或其他大模型密钥）
 OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 ```
 
@@ -264,7 +253,7 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 | 7 | Qwen3-ASR 离线识别模型 | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
 | 8 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
 
-### 5. 准备音效文件（新增assistant时才需要）
+### 5. 准备音效文件（看看就行，懒得换音效的话不用研究）
 
 在 `data/voices/` 目录下准备以下音效文件（WAV 格式）：
 
@@ -288,11 +277,14 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 
 ### 6. 启动语音助手
 
-**macOS / Linux：**
+**macOS：**
 
-```bash
-./scripts/start.sh
-```
+1.请从[此处](https://modelscope.cn/datasets/rubintry/jarvis/files)下载assistant_overlay.dmg、control_center.dmg
+
+2.安装assistant_overlay.dmg和dmg、control_center.dmg
+
+3.打开「control_center」app，根据提示录入声纹后，开启语音助手，喊出贾维斯
+
 
 **Windows：**
 
@@ -306,11 +298,6 @@ scripts\start.bat
 3. 启动 Flutter HUD 视觉特效窗口
 4. 启动语音助手主程序
 
-> **首次运行需要构建 HUD**：
-> ```bash
-> cd assistant_overlay
-> flutter build macos --debug    # macOS
-> ```
 
 ## 使用教程
 

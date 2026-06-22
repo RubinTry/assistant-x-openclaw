@@ -130,3 +130,7 @@ windows/runner/*.ico.bak
 # Trae AI
 .trae/
 
+
+# 贾维斯粒子特效序列帧（约 376MB），改为 Release 分发，不入库
+# 下载: https://gitee.com/rubintry/assistant-x-openclaw/releases/tag/v1.0.1
+assistant_overlay/assets/jarvis/*.png
