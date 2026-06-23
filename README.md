@@ -1,5 +1,7 @@
 # Assistant-X-OpenClaw
 
+> ![妈妈我再也不用羡慕钢铁侠了](./docs/jarvis.png)
+
 妈妈我再也不用羡慕钢铁侠了😭
 
 多角色 AI 语音助手，基于 sherpa-onnx 本地运行，通过 OpenClaw Gateway 对接大模型。支持多角色切换、语音唤醒、连续对话、TTS 播报和 HUD 视觉特效。语音识别和合成都跑在本地，LLM 走网关，隐私有保障。
