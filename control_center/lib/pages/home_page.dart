@@ -67,6 +67,11 @@ class HomePageState extends State<HomePage> {
       );
       const settings = InitializationSettings(macOS: darwin);
       await _notifications.initialize(settings);
+      // 显式请求一次通知权限：部分 macOS 版本 initialize 不会自动弹授权框
+      await _notifications
+          .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(alert: true, sound: true, badge: false);
       _notificationsReady = true;
     } catch (e) {
       debugPrint('通知初始化失败: $e');
@@ -93,7 +98,8 @@ class HomePageState extends State<HomePage> {
       _tcpServer = await ServerSocket.bind('127.0.0.1', _speakerRejectedPort);
       _tcpServer!.listen((socket) {
         socket.listen((data) {
-          final message = String.fromCharCodes(data).trim();
+          // 必须按 UTF-8 解码：notify_bridge 发的 JSON 含中文，逐字节解码会乱码
+          final message = utf8.decode(data, allowMalformed: true).trim();
           // 新协议：一行 JSON {"type":"notify",...} → 弹系统通知（本应用图标）
           // 旧协议：裸串 "speaker_rejected" → 弹应用内"去注册"对话框（向后兼容）
           if (message.startsWith('{')) {
