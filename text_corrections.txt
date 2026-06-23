@@ -1,0 +1,8 @@
+# 文本后处理纠错规则
+# 格式: <错误形式> : <正确形式>
+# 大小写不敏感，整词匹配 (使用 \b 边界)
+# 修复 sherpa-onnx ASR 在 cjkchar+bpe 模型下对常见人名/术语的识别偏差
+TONY STOCK : Tony Stark
+TONY STOCKS : Tony Starks
+TONY STOCK. : Tony Stark.
+TONY STOCK, : Tony Stark,

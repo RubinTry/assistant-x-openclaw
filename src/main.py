@@ -129,6 +129,70 @@ _AUDIO_STALL_TIMEOUT = 15  # 秒
 _dnd_mode = False  # Do Not Disturb 模式，注册时不响应唤醒词
 
 
+# ── 文本纠错表（兜底修复 sherpa-onnx ASR 误识别人名/术语）──────────────────
+# 加载逻辑：读取 text_corrections.txt，每行格式 `<错误> : <正确>`，
+# 在 ASR 最终结果（_process_recognition_result）送视觉/送 LLM 之前整词大小写
+# 不敏感替换。sherpa hotwords 对 cjkchar+bpe 模型下 OOV 英文整词的偏置几乎
+# 无效（整词 token 找不到就静默跳过），所以这条兜底是真正的可靠修复路径。
+# 文件与 hotwords.txt 同级，main 启动时一次性加载，运行期可热重载（按需）。
+import re as _re_corrections
+
+_TEXT_CORRECTIONS_PATH = os.path.join(_PROJECT_DIR, "text_corrections.txt")
+_TEXT_CORRECTIONS = []  # list[(compiled_pattern, replacement)]
+
+
+def _load_text_corrections(path=None):
+    """加载 text_corrections.txt 到 _TEXT_CORRECTIONS，返回加载条数。
+
+    文件不存在时静默返回 0（纠错是可选功能）。运行期可重复调用做热重载。
+    """
+    global _TEXT_CORRECTIONS
+    p = path or _TEXT_CORRECTIONS_PATH
+    rules = []
+    if not os.path.exists(p):
+        _TEXT_CORRECTIONS = []
+        return 0
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if ":" not in line:
+                    continue
+                bad, good = line.split(":", 1)
+                bad = bad.strip()
+                good = good.strip()
+                if not bad:
+                    continue
+                # 整词大小写不敏感：re.escape 后用 \b...\b 包裹
+                # flags 设为 re.IGNORECASE，匹配时保形替换为 good（good 自带期望大小写）
+                pat = _re_corrections.compile(
+                    r"(?<![A-Za-z0-9_])" + _re_corrections.escape(bad) + r"(?![A-Za-z0-9_])",
+                    _re_corrections.IGNORECASE,
+                )
+                rules.append((pat, good))
+    except Exception as e:
+        print(f"[文本纠错] 加载失败: {e}")
+        _TEXT_CORRECTIONS = []
+        return 0
+    _TEXT_CORRECTIONS = rules
+    return len(rules)
+
+
+def _apply_text_corrections(text):
+    """应用所有纠错规则到 text，返回修正后字符串。无规则时返回原串。"""
+    if not _TEXT_CORRECTIONS or not text:
+        return text
+    out = text
+    for pat, repl in _TEXT_CORRECTIONS:
+        out = pat.sub(repl, out)
+    return out
+
+
+_load_text_corrections()
+
+
 def _notify_speaker_rejected():
     """通知 control_center 声纹验证被拒绝"""
     import socket
@@ -1114,6 +1178,12 @@ class VoiceAssistant:
             return True
 
         _recog = recognition_result.strip()
+        # 文本纠错：兜底修复 sherpa hotwords 救不了的 OOV 英文整词误识别
+        # （如 "TONY STOCK" → "Tony Stark"）。幂等安全，流式中间态替换不影响 final。
+        _corrected = _apply_text_corrections(_recog)
+        if _corrected != _recog:
+            print(f"[文本纠错] {_recog!r} → {_corrected!r}")
+        _recog = _corrected
         _is_exit = _recog in EXIT_KEYWORDS or _recog in INSTANT_EXIT_FUZZY
         if _is_exit:
             print(f"收到退出指令: {recognition_result.strip()}")
@@ -1135,11 +1205,11 @@ class VoiceAssistant:
             print("\n已退出监听，等待唤醒词...")
             return False
 
-        self.visual.show_user_text(recognition_result)
+        self.visual.show_user_text(_recog)
         if not self._ignore_next_result:
             threading.Thread(
                 target=self._on_recognized,
-                args=(recognition_result,),
+                args=(_recog,),
                 daemon=True,
             ).start()
         else:
