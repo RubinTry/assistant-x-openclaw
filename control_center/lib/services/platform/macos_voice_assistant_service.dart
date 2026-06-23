@@ -188,11 +188,17 @@ class MacOSVoiceAssistantService implements VoiceAssistantServiceBase {
 
   @override
   Future<void> setDndMode(bool enabled) async {
+    // Python 端 18790 是 HTTP server（do_POST 认 /dnd、/dnd/disable）。
+    // 必须发真正的 HTTP POST；裸 TCP 字符串会被当成畸形请求丢弃，DND 不会生效。
     try {
-      final sock = await Socket.connect('127.0.0.1', 18790, timeout: const Duration(seconds: 2));
-      final msg = enabled ? 'dnd\n' : 'dnd/disable\n';
-      sock.add(msg.codeUnits);
-      await sock.close();
+      final client = HttpClient();
+      final path = enabled ? '/dnd' : '/dnd/disable';
+      final req = await client
+          .postUrl(Uri.parse('http://127.0.0.1:18790$path'))
+          .timeout(const Duration(seconds: 2));
+      final resp = await req.close();
+      await resp.drain<void>();
+      client.close();
     } catch (_) {}
   }
 

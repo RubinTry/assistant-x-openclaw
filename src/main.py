@@ -118,8 +118,13 @@ _ASSISTANTS_CFG_PATH = os.path.join(_PROJECT_DIR, "assistants.json")
 _SPEAKER_MODEL_PATH = os.path.join(_PROJECT_DIR, "models", "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx")
 _SPEAKER_DIR = os.path.join(_PROJECT_DIR, "data", "enrollment")
 _SPEAKER_FILE = os.path.join(_SPEAKER_DIR, "speakers.json")
-_SPEAKER_THRESHOLD = 0.4  # 声纹相似度阈值
+_SPEAKER_THRESHOLD = 0.55  # 声纹相似度阈值
 _SPEAKER_NOTIFY_PORT = 18792  # control_center TCP 通知端口
+
+# 音频流假死看门狗：macOS CoreAudio 在反复关停/重开 InputStream 后偶发
+# "start 成功但回调不再送帧"。健康时即使无人说话也会持续产生静音帧，
+# 因此"持续 N 秒拿不到任何帧"是死流的可靠信号，不会被正常静默误触发。
+_AUDIO_STALL_TIMEOUT = 15  # 秒
 
 _dnd_mode = False  # Do Not Disturb 模式，注册时不响应唤醒词
 
@@ -394,6 +399,7 @@ class VoiceAssistant:
         self.last_activity_time = time.time()
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
         self._wake_buffer_max_samples = int(self.sample_rate * 3)  # 最多存3秒
+        self._prev_dnd_mode = False  # 上一轮勿扰状态，用于检测 DND 解除瞬间清流
 
         # VAD 前置缓存（用于待机时轻量级语音检测）
         self._vad_buffer = []
@@ -1280,8 +1286,21 @@ class VoiceAssistant:
                     try:
                         audio_data = self.audio_queue.get(timeout=0.5)
                     except queue.Empty:
+                        # 处理期间麦克风假死会让打断监听失效；重建音频流以恢复，
+                        # 但不动 _is_processing 等标志（由请求/TTS 线程负责复位）。
+                        if time.time() - self.last_activity_time > _AUDIO_STALL_TIMEOUT:
+                            print("[看门狗] 处理期间音频流假死，重建以恢复打断监听...")
+                            stop_audio_stream()
+                            time.sleep(0.1)
+                            self._clear_queue()
+                            keyword_stream = self.keyword_spotter.create_stream()
+                            start_audio_stream()
+                            time.sleep(0.1)
+                            self._clear_queue()
+                            self.last_activity_time = time.time()
                         continue
 
+                    self.last_activity_time = time.time()
                     samples = audio_data.reshape(-1)
                     keyword_stream.accept_waveform(self.sample_rate, samples)
 
@@ -1319,8 +1338,22 @@ class VoiceAssistant:
                 try:
                     audio_data = self.audio_queue.get(timeout=0.5)
                 except queue.Empty:
-                    if not self.is_awake and time.time() - self.last_activity_time > 30:
-                        print("[健康检查] 音频流超过30秒无数据，正在重建...")
+                    # 音频流假死兜底：不论待机还是已唤醒，只要持续拿不到帧就重建。
+                    # 旧逻辑仅在 not is_awake 时重建，导致"唤醒态麦克风假死"时主循环
+                    # 在此处静默空转——既不打印日志、回不了待机、也唤不醒。
+                    stalled = time.time() - self.last_activity_time
+                    if stalled > _AUDIO_STALL_TIMEOUT:
+                        was_awake = self.is_awake
+                        print(
+                            f"[看门狗] 音频流 {stalled:.0f}s 无数据，判定假死，正在重建"
+                            + ("（并强制回到待机）..." if was_awake else "...")
+                        )
+                        # 死流期间可能卡住的状态全部复位，确保能重新被唤醒
+                        if was_awake:
+                            self.is_awake = False
+                            self.continuous_mode = False
+                            recognition_stream = None
+                            recognition_result = ""
                         stop_audio_stream()
                         time.sleep(0.1)
                         self._clear_queue()
@@ -1329,6 +1362,7 @@ class VoiceAssistant:
                         time.sleep(0.1)
                         self._clear_queue()
                         self.last_activity_time = time.time()
+                        print("[看门狗] 音频流已重建，等待唤醒词...")
                     continue
 
                 samples = audio_data.reshape(-1)
@@ -1355,6 +1389,12 @@ class VoiceAssistant:
                         vad_stream.accept_waveform(samples)
                         if vad_stream.is_speech_detected():
                             vad_has_speech = True
+
+                    # DND 解除瞬间：重建 KWS 流，清掉跨越勿扰边界残留的半个唤醒词，
+                    # 避免声纹录入刚结束就被尾音误唤醒（边沿触发，仅在 True→False 时执行一次）
+                    if self._prev_dnd_mode and not _dnd_mode:
+                        keyword_stream = self.keyword_spotter.create_stream()
+                    self._prev_dnd_mode = _dnd_mode
 
                     # KWS 实时检测
                     keyword_stream.accept_waveform(self.sample_rate, samples)
@@ -1794,7 +1834,7 @@ class VoiceAssistant:
                     tts_queue.put(seg)
 
             def _tts_worker():
-                import sounddevice as sd
+                from audio import play_array
 
                 while True:
                     seg = tts_queue.get()
@@ -1807,14 +1847,12 @@ class VoiceAssistant:
                         continue
                     audio_data, sr = result
                     _tts_playing.set()
-                    sd.play(audio_data * 1.5, samplerate=sr)
-                    # 可中断地等待播完：打断时立即停掉当前句
-                    deadline = time.time() + len(audio_data) / float(sr) + 0.1
-                    while time.time() < deadline:
-                        if self._stop_openclaw_request.is_set():
-                            sd.stop()
-                            break
-                        time.sleep(0.05)
+                    # 统一播放出口：重采样到设备原生采样率消除电流杂音，
+                    # 打断时立即停掉当前句
+                    play_array(
+                        audio_data, sr, volume=1.5, blocking=True,
+                        stop_check=self._stop_openclaw_request.is_set,
+                    )
 
             def _tts_flusher():
                 """监控停顿：缓冲非空且超过 debounce 无新输出则触发朗读。"""

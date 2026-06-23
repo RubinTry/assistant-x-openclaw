@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../services/service_factory.dart';
 import '../models/log_entry.dart';
 import 'speaker_manage_page.dart';
@@ -26,9 +28,15 @@ class HomePageState extends State<HomePage> {
   ServerSocket? _tcpServer;
   static const int _speakerRejectedPort = 18792;
 
+  // 系统通知插件：由本应用（control_center）弹出，通知图标即本应用 bundle 图标
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
+  bool _notificationsReady = false;
+
   @override
   void initState() {
     super.initState();
+    _initNotifications();
     _requestPermissions();
     _service.outputStream.listen((msg) {
       setState(() {
@@ -50,13 +58,56 @@ class HomePageState extends State<HomePage> {
     _startTcpServer();
   }
 
+  Future<void> _initNotifications() async {
+    try {
+      const darwin = DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestSoundPermission: true,
+        requestBadgePermission: false,
+      );
+      const settings = InitializationSettings(macOS: darwin);
+      await _notifications.initialize(settings);
+      _notificationsReady = true;
+    } catch (e) {
+      debugPrint('通知初始化失败: $e');
+    }
+  }
+
+  Future<void> _showSystemNotification(
+      String title, String text, bool sound) async {
+    if (!_notificationsReady) return;
+    try {
+      final details = NotificationDetails(
+        macOS: DarwinNotificationDetails(presentSound: sound),
+      );
+      // id 用时间戳低位，保证多条通知不互相覆盖
+      final id = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
+      await _notifications.show(id, title, text, details);
+    } catch (e) {
+      debugPrint('弹出通知失败: $e');
+    }
+  }
+
   Future<void> _startTcpServer() async {
     try {
       _tcpServer = await ServerSocket.bind('127.0.0.1', _speakerRejectedPort);
       _tcpServer!.listen((socket) {
         socket.listen((data) {
           final message = String.fromCharCodes(data).trim();
-          if (message == 'speaker_rejected') {
+          // 新协议：一行 JSON {"type":"notify",...} → 弹系统通知（本应用图标）
+          // 旧协议：裸串 "speaker_rejected" → 弹应用内"去注册"对话框（向后兼容）
+          if (message.startsWith('{')) {
+            try {
+              final obj = jsonDecode(message) as Map<String, dynamic>;
+              if (obj['type'] == 'notify') {
+                _showSystemNotification(
+                  (obj['title'] ?? '').toString(),
+                  (obj['text'] ?? '').toString(),
+                  obj['sound'] != false,
+                );
+              }
+            } catch (_) {}
+          } else if (message == 'speaker_rejected') {
             _showSpeakerRejectedDialog();
           }
           socket.add('ok\n'.codeUnits);
