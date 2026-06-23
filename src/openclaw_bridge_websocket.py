@@ -343,8 +343,13 @@ class OpenClawBridgeWebSocket:
             logger.error("创建 WebSocketApp 失败: %s", e)
             return False
 
+        # 开启 WebSocket 心跳保活：每 ping_interval 秒发 ping，ping_timeout 秒内无
+        # pong 即判定连接已死并关闭（触发 on_close 清 _connected），下次发送时
+        # _ensure_connected 会自动重连。否则长空闲/网关重启后连接半死、_connected
+        # 仍为 set，ws.send() 会卡在死 socket 上无限阻塞，表现为"喊着喊着没反应"。
+        ws_obj = self._ws
         self._ws_thread = threading.Thread(
-            target=self._ws.run_forever,
+            target=lambda: ws_obj.run_forever(ping_interval=20, ping_timeout=10),
             daemon=True,
             name="bridge-ws",
         )
@@ -372,6 +377,8 @@ class OpenClawBridgeWebSocket:
 
     def _on_error(self, ws, error) -> None:
         logger.error("WebSocket 错误: %s", error)
+        # ping 超时等错误也标记为未连接，确保下次发送触发重连（双保险，on_close 亦会清）
+        self._connected.clear()
 
     def _on_message(self, ws, message) -> None:
         try:
