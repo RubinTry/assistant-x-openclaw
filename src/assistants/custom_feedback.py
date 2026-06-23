@@ -100,10 +100,16 @@ class ConfigurableFeedback(AssistantFeedback):
         if not self.notification_enabled:
             return
         try:
+            # 优先让 control_center 弹通知（图标为其自身 bundle 图标，更美观）
+            from notify_bridge import notify_control_center
+
+            if notify_control_center(title, text, sound):
+                return
+
+            # 回退：control_center 未运行时用原生通知
             if platform.system() == "Windows":
                 print(f"[{self._notification_prefix} 通知] {title}: {text}")
                 return
-
             script = f'display notification "{text}" with title "{title}"'
             if sound:
                 script += ' sound name "Glass"'

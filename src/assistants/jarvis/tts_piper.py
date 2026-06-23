@@ -169,7 +169,7 @@ def synthesize_streaming(text: str, stop_event: threading.Event = None,
         return False
 
     try:
-        import sounddevice as sd
+        from audio import play_array
 
         result = _synthesize_raw(text)
         if stop_event and stop_event.is_set():
@@ -181,8 +181,11 @@ def synthesize_streaming(text: str, stop_event: threading.Event = None,
         if len(audio) == 0:
             return False
 
-        sd.play(audio * volume, samplerate=sr)
-        sd.wait()
+        # 重采样到设备原生采样率后再播放，避免实时变采样产生电流杂音
+        play_array(
+            audio, sr, volume=volume, blocking=True,
+            stop_check=(stop_event.is_set if stop_event else None),
+        )
         return True
     except Exception as e:
         logger.warning(f"合成播放失败: {e}")

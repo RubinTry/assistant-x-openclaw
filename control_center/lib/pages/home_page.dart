@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../services/service_factory.dart';
 import '../models/log_entry.dart';
 import 'speaker_manage_page.dart';
@@ -26,9 +28,15 @@ class HomePageState extends State<HomePage> {
   ServerSocket? _tcpServer;
   static const int _speakerRejectedPort = 18792;
 
+  // 系统通知插件：由本应用（control_center）弹出，通知图标即本应用 bundle 图标
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
+  bool _notificationsReady = false;
+
   @override
   void initState() {
     super.initState();
+    _initNotifications();
     _requestPermissions();
     _service.outputStream.listen((msg) {
       setState(() {
@@ -50,13 +58,99 @@ class HomePageState extends State<HomePage> {
     _startTcpServer();
   }
 
+  Future<void> _initNotifications() async {
+    try {
+      const darwin = DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestSoundPermission: true,
+        requestBadgePermission: false,
+      );
+      const settings = InitializationSettings(macOS: darwin);
+      await _notifications.initialize(settings);
+      final macPlugin = _notifications.resolvePlatformSpecificImplementation<
+          MacOSFlutterLocalNotificationsPlugin>();
+      // notDetermined（从未决定）时这一步会弹系统授权框；
+      // 已被用户在系统设置中关闭（denied）时，macOS 不会再弹框，request 静默返回。
+      await macPlugin?.requestPermissions(alert: true, sound: true, badge: false);
+      _notificationsReady = true;
+      // 每次启动都检查实际权限状态：若处于关闭态，系统不会自动弹框，
+      // 改为应用内引导用户去系统设置手动开启。
+      final opts = await macPlugin?.checkPermissions();
+      if (mounted && opts != null && !opts.isEnabled) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showNotificationDeniedDialog();
+        });
+      }
+    } catch (e) {
+      debugPrint('通知初始化失败: $e');
+    }
+  }
+
+  void _showNotificationDeniedDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('通知权限未开启'),
+        content: const Text(
+          '语音助手的桌面通知需要系统通知权限，当前已关闭。\n'
+          '请在「系统设置 › 通知 › Control Center」中允许通知。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // 跳转到系统设置的「通知」面板
+              Process.run('open', [
+                'x-apple.systempreferences:com.apple.preference.notifications',
+              ]);
+            },
+            child: const Text('去设置'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showSystemNotification(
+      String title, String text, bool sound) async {
+    if (!_notificationsReady) return;
+    try {
+      final details = NotificationDetails(
+        macOS: DarwinNotificationDetails(presentSound: sound),
+      );
+      // id 用时间戳低位，保证多条通知不互相覆盖
+      final id = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
+      await _notifications.show(id, title, text, details);
+    } catch (e) {
+      debugPrint('弹出通知失败: $e');
+    }
+  }
+
   Future<void> _startTcpServer() async {
     try {
       _tcpServer = await ServerSocket.bind('127.0.0.1', _speakerRejectedPort);
       _tcpServer!.listen((socket) {
         socket.listen((data) {
-          final message = String.fromCharCodes(data).trim();
-          if (message == 'speaker_rejected') {
+          // 必须按 UTF-8 解码：notify_bridge 发的 JSON 含中文，逐字节解码会乱码
+          final message = utf8.decode(data, allowMalformed: true).trim();
+          // 新协议：一行 JSON {"type":"notify",...} → 弹系统通知（本应用图标）
+          // 旧协议：裸串 "speaker_rejected" → 弹应用内"去注册"对话框（向后兼容）
+          if (message.startsWith('{')) {
+            try {
+              final obj = jsonDecode(message) as Map<String, dynamic>;
+              if (obj['type'] == 'notify') {
+                _showSystemNotification(
+                  (obj['title'] ?? '').toString(),
+                  (obj['text'] ?? '').toString(),
+                  obj['sound'] != false,
+                );
+              }
+            } catch (_) {}
+          } else if (message == 'speaker_rejected') {
             _showSpeakerRejectedDialog();
           }
           socket.add('ok\n'.codeUnits);

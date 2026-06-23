@@ -244,6 +244,7 @@ class _EnrollDialogState extends State<_EnrollDialog> {
   bool _isRunning = true;
   bool _success = false;
   final _service = ServiceFactory.speakerService;
+  final _vaService = ServiceFactory.voiceAssistantService;
 
   @override
   void initState() {
@@ -253,27 +254,35 @@ class _EnrollDialogState extends State<_EnrollDialog> {
 
   @override
   void dispose() {
+    // 兜底：弹窗被中途关闭（录入未走到 finally）时也要解除勿扰，避免主程序永久哑火
+    _vaService.setDndMode(false);
     _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _startEnroll() async {
-    await for (final msg in _service.enrollSpeakerStream()) {
-      widget.onLog?.call(msg);
-      if (mounted) {
-        setState(() {
-          _logs.add(msg);
-        });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients) {
-            _scrollController.animateTo(
-              _scrollController.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 100),
-              curve: Curves.easeOut,
-            );
-          }
-        });
+    // 录入期间进入勿扰：暂停主程序唤醒词响应，避免录音时反复喊"贾维斯"误唤醒
+    await _vaService.setDndMode(true);
+    try {
+      await for (final msg in _service.enrollSpeakerStream()) {
+        widget.onLog?.call(msg);
+        if (mounted) {
+          setState(() {
+            _logs.add(msg);
+          });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients) {
+              _scrollController.animateTo(
+                _scrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 100),
+                curve: Curves.easeOut,
+              );
+            }
+          });
+        }
       }
+    } finally {
+      await _vaService.setDndMode(false);
     }
 
     if (mounted) {
