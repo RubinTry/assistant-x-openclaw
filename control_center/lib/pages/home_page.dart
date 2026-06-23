@@ -67,15 +67,52 @@ class HomePageState extends State<HomePage> {
       );
       const settings = InitializationSettings(macOS: darwin);
       await _notifications.initialize(settings);
-      // 显式请求一次通知权限：部分 macOS 版本 initialize 不会自动弹授权框
-      await _notifications
-          .resolvePlatformSpecificImplementation<
-              MacOSFlutterLocalNotificationsPlugin>()
-          ?.requestPermissions(alert: true, sound: true, badge: false);
+      final macPlugin = _notifications.resolvePlatformSpecificImplementation<
+          MacOSFlutterLocalNotificationsPlugin>();
+      // notDetermined（从未决定）时这一步会弹系统授权框；
+      // 已被用户在系统设置中关闭（denied）时，macOS 不会再弹框，request 静默返回。
+      await macPlugin?.requestPermissions(alert: true, sound: true, badge: false);
       _notificationsReady = true;
+      // 每次启动都检查实际权限状态：若处于关闭态，系统不会自动弹框，
+      // 改为应用内引导用户去系统设置手动开启。
+      final opts = await macPlugin?.checkPermissions();
+      if (mounted && opts != null && !opts.isEnabled) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showNotificationDeniedDialog();
+        });
+      }
     } catch (e) {
       debugPrint('通知初始化失败: $e');
     }
+  }
+
+  void _showNotificationDeniedDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('通知权限未开启'),
+        content: const Text(
+          '语音助手的桌面通知需要系统通知权限，当前已关闭。\n'
+          '请在「系统设置 › 通知 › Control Center」中允许通知。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // 跳转到系统设置的「通知」面板
+              Process.run('open', [
+                'x-apple.systempreferences:com.apple.preference.notifications',
+              ]);
+            },
+            child: const Text('去设置'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showSystemNotification(
