@@ -36,6 +36,9 @@ abstract class AgentVisual {
   ///构建其他组件
   Widget buildOtherOne(BuildContext context, double screenWidth, double screenHeight);
 
+  ///构建其他组件
+  Widget buildOtherTwo(BuildContext context, double screenWidth, double screenHeight);
+
 
   /// 释放资源
   void dispose();

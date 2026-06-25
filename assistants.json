@@ -1,4 +1,6 @@
 {
+    "engine_comment": "主脑引擎，可选值：openclaw（默认）、hermes",
+    "engine": "hermes",
     "default": "jarvis",
     "assistants": [
         {

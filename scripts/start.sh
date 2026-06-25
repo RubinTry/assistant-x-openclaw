@@ -119,6 +119,21 @@ else
     exit 1
 fi
 
+# ── 主脑引擎自愈：engine=hermes 时确保各角色 Hermes 网关在跑 ───────────
+ENGINE=$("$VENV_PYTHON" -c "import json;print((json.load(open('${PROJECT_DIR}/assistants.json')).get('engine') or 'openclaw').strip().lower())" 2>/dev/null || echo openclaw)
+HERMES_PIDS_FILE="${PROJECT_DIR}/.hermes_gateways.pids"
+if [ "$ENGINE" = "hermes" ]; then
+    echo "[引擎] hermes：校验各角色网关…"
+    if "$VENV_PYTHON" "${SCRIPT_DIR}/hermes_provision.py"; then
+        echo "[引擎] hermes：角色网关就绪"
+    else
+        echo "[引擎] hermes：角色网关自愈失败，请检查 hermes 安装与模型凭证"
+        exit 1
+    fi
+else
+    echo "[引擎] ${ENGINE}：跳过 Hermes 自愈"
+fi
+
 cleanup() {
     echo "正在关闭..."
     for port in 17888 17889; do
@@ -127,6 +142,13 @@ cleanup() {
             kill -9 $PIDS 2>/dev/null
         fi
     done
+    # 关闭由本脚本拉起的各角色 Hermes 网关（若有）
+    if [ "$ENGINE" = "hermes" ] && [ -f "$HERMES_PIDS_FILE" ]; then
+        while read -r VPID; do
+            [ -n "$VPID" ] && kill "$VPID" 2>/dev/null && echo "  已关闭 Hermes 网关 (pid=$VPID)"
+        done < "$HERMES_PIDS_FILE"
+        rm -f "$HERMES_PIDS_FILE"
+    fi
     osascript -e 'quit app "jarvis_overlay"' 2>/dev/null
     exit 0
 }

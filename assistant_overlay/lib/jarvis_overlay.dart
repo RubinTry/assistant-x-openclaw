@@ -534,7 +534,7 @@ class JarvisAgentVisual implements AgentVisual {
         curve: Curves.easeOutCubic,
       );
     } else if (command == 'reset_scale') {
-      // 用户讲完话，恢复特效大小（从 1.1 回到 1）
+      // 用户讲完话，恢复特效大小（从 1.5 回到 1）
       _isSpeaking = false;
       if (_ringScaleController.value > 1.0) {
         _ringScaleController.animateTo(
@@ -583,11 +583,11 @@ class JarvisAgentVisual implements AgentVisual {
       _rightTerminalSlideController.reverse();
     } else if (command.startsWith('user:')) {
       final text = command.substring(5);
-      // 用户讲话，从当前值平滑变到 1.1（只触发一次）
+      // 用户讲话，从当前值平滑变到 1.3（只触发一次）
       if (text.isNotEmpty && !_isSpeaking) {
         _isSpeaking = true;
         _ringScaleController.animateTo(
-          1.1,
+          1.3,
           duration: const Duration(milliseconds: 800),
           curve: Curves.easeInOut,
         );
@@ -741,7 +741,7 @@ class JarvisAgentVisual implements AgentVisual {
       child: Align(
         alignment: Alignment.topLeft,
         child: Container(
-          margin: EdgeInsets.only(left: 40, top: screenHeight * 0.25),
+          margin: EdgeInsets.only(left: 40, top: screenHeight * 0.10),
           child: SizedBox(
             height: terminalHeight,
             child: _buildTerminal(
@@ -777,7 +777,7 @@ class JarvisAgentVisual implements AgentVisual {
       child: Align(
         alignment: Alignment.bottomRight,
         child: Container(
-          margin: EdgeInsets.only(right: 40, bottom: screenHeight * 0.25),
+          margin: EdgeInsets.only(right: 40, bottom: screenHeight * 0.15),
           child: SizedBox(
             height: terminalHeight,
             child: _buildTerminal(
@@ -798,7 +798,7 @@ class JarvisAgentVisual implements AgentVisual {
     double screenWidth,
     double screenHeight,
   ) {
-    final size = 500.0;
+    final size = 400.0;
 
     return Center(
       child: AnimatedBuilder(
@@ -820,7 +820,7 @@ class JarvisAgentVisual implements AgentVisual {
                         child: JarvisSequencePlayer(
                           assetDir: 'assets/jarvis', // 只需要指定目录
                           assetSuffix: '.png',
-                          fps: 60,
+                          fps: 24,
                         ),
                       );
                     },
@@ -922,64 +922,61 @@ class JarvisAgentVisual implements AgentVisual {
             child: AnimatedBuilder(
               animation: _ringScaleController,
               builder: (context, child) {
-                return Transform.scale(
-                  scale: _ringScaleController.value,
-                  child: AnimatedBuilder(
-                    animation: _pulseController,
-                    builder: (context, child) {
-                      return SizedBox(
-                        width: 150,
-                        height: 150,
-                        child: CustomPaint(
-                          painter: Platform.isWindows
-                              ? JarvisRingsPainterWindows(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
-                                  currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
-                                )
-                              : JarvisRingsPainter(
-                                  outerRingRotation:
-                                      (_outerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  arcsRotation:
-                                      (_arcsAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  dataRingRotation:
-                                      (_dataRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  innerRingRotation:
-                                      (_innerRingAngle * 2 * math.pi) %
-                                      (2 * math.pi),
-                                  pulseValue: _pulseController.value,
-                                  currentEffect: _currentEffect,
-                                  speakingScale:
-                                      (_ringScaleController.value - 1.0).clamp(
-                                        0.0,
-                                        0.1,
-                                      ) *
-                                      10,
-                                ),
+                return AnimatedBuilder(
+                  animation: _pulseController,
+                  builder: (context, child) {
+                    return SizedBox(
+                      width: 200,
+                      height: 200,
+                      child: CustomPaint(
+                        painter: Platform.isWindows
+                            ? JarvisRingsPainterWindows(
+                          outerRingRotation:
+                          (_outerRingAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          arcsRotation:
+                          (_arcsAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          dataRingRotation:
+                          (_dataRingAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          innerRingRotation:
+                          (_innerRingAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          pulseValue: _pulseController.value,
+                          currentEffect: _currentEffect,
+                          speakingScale:
+                          (_ringScaleController.value - 1.0).clamp(
+                            0.0,
+                            0.1,
+                          ) *
+                              10,
+                        )
+                            : JarvisRingsPainter(
+                          outerRingRotation:
+                          (_outerRingAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          arcsRotation:
+                          (_arcsAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          dataRingRotation:
+                          (_dataRingAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          innerRingRotation:
+                          (_innerRingAngle * 2 * math.pi) %
+                              (2 * math.pi),
+                          pulseValue: _pulseController.value,
+                          currentEffect: _currentEffect,
+                          speakingScale:
+                          (_ringScaleController.value - 1.0).clamp(
+                            0.0,
+                            0.1,
+                          ) *
+                              10,
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    );
+                  },
                 );
               },
             ),
@@ -987,6 +984,42 @@ class JarvisAgentVisual implements AgentVisual {
         },
       ),
     );
+  }
+
+  @override
+  Widget buildOtherTwo(BuildContext context, double screenWidth, double screenHeight) {
+    final double terminalHeight = screenHeight / 3;
+    return  Positioned(
+      left: 0,
+      bottom: screenHeight * 0.08,
+      child: AnimatedBuilder(
+        animation: _ringOpacityController,
+        builder: (context, child) {
+          return Opacity(
+            opacity: _ringOpacityController.value,
+            child: AnimatedBuilder(
+              animation: _ringScaleController,
+              builder: (context, child) {
+                return AnimatedBuilder(
+                  animation: _pulseController,
+                  builder: (context, child) {
+                    return SizedBox(
+                      width: terminalHeight,
+                      height: terminalHeight,
+                      child: JarvisSequencePlayer(
+                        assetDir: 'assets/ironman', // 只需要指定目录
+                        assetSuffix: '.png',
+                        fps: 30,
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );;
   }
 }
 

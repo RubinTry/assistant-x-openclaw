@@ -102,7 +102,6 @@ from tts import (
     stop_tts,
     set_tts,
 )
-from openclaw_bridge_websocket import get_bridge
 from log_setup import setup_logging
 from assistants import (
     AssistantManager,
@@ -113,6 +112,30 @@ from assistants import (
 # ── assistants.json 配置加载 ─────────────────────────────────
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ASSISTANTS_CFG_PATH = os.path.join(_PROJECT_DIR, "assistants.json")
+
+
+# ── 主脑引擎选择（assistants.json 顶层 engine 字段，默认 openclaw）──────────
+def _load_engine() -> str:
+    """读取 assistants.json 顶层 engine：openclaw（默认）| hermes。"""
+    try:
+        with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
+            return (json.load(f).get("engine") or "openclaw").strip().lower()
+    except Exception:
+        return "openclaw"
+
+
+_ENGINE = _load_engine()
+if _ENGINE == "hermes":
+    from hermes_bridge import get_bridge  # noqa: E402
+
+    print("[引擎] 主脑：Hermes（一角色一 profile 一网关）")
+else:
+    from openclaw_bridge_websocket import get_bridge  # noqa: E402
+
+    if _ENGINE != "openclaw":
+        print(f"[引擎] 未知 engine='{_ENGINE}'，回退 OpenClaw")
+    else:
+        print("[引擎] 主脑：OpenClaw")
 
 # ── 声纹验证配置 ────────────────────────────────────────────
 _SPEAKER_MODEL_PATH = os.path.join(_PROJECT_DIR, "models", "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx")
