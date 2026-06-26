@@ -2,7 +2,7 @@
 
 > ![妈妈我再也不用羡慕钢铁侠了](./docs/jarvis.png)
 
-[Hermes版本请看这](./hermes-assistant.md)
+<h3 align="center"><a href="./hermes-assistant.md">Hermes 版本请看这 →</a></h3>
 
 妈妈我再也不用羡慕钢铁侠了😭
 
