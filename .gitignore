@@ -140,3 +140,4 @@ assistant_overlay/assets/ironman/*.png
 
 # Hermes 多角色网关运行时 pid（方案 B）
 .hermes_gateways.pids
+.DS_Store

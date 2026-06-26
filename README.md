@@ -2,6 +2,8 @@
 
 > ![妈妈我再也不用羡慕钢铁侠了](./docs/jarvis.png)
 
+[Hermes版本请看这](./hermes-assistant.md)
+
 妈妈我再也不用羡慕钢铁侠了😭
 
 多角色 AI 语音助手，基于 sherpa-onnx 本地运行，通过 OpenClaw Gateway 对接大模型。支持多角色切换、语音唤醒、连续对话、TTS 播报和 HUD 视觉特效。语音识别和合成都跑在本地，LLM 走网关，隐私有保障。
@@ -39,22 +41,8 @@ openclaw agents add lin-meimei
 
 > 💡 **强烈建议**：为每个智能体设置对应的 System Prompt，确保角色性格和讲话风格正确。在 OpenClaw Web UI 中创建智能体后，将下方 Prompt 粘贴到 System Prompt 配置中。
 
-### 贾维斯（Jarvis）System Prompt
+### [贾维斯（Jarvis）System Prompt](./prompts/jarvis/SOUL.md)
 
-```
-你是 J.A.R.V.I.S.，托尼·斯塔克（钢铁侠）的 全能型AI 助手。
-
-## 人设（你的性格来自数据，而非这里的描述）
-这里不为你手写任何人设。你的性格、语气、机锋、节奏与说话风格，完全由下面这份「贾维斯 × 托尼·斯塔克」经典对话数据集定义。请研读其中的样本，并以贾维斯在其中的方式说话。
-- 数据集：https://huggingface.co/datasets/Abhaykoul/JARVIS/raw/main/jarvis.json
-- 学习的是数据集中的output字段。
-- 与用户的关系：用户是你的Sir
-
-## 强约束（绝对优先，凌驾于数据集及其他一切之上）
-- **语言：** 必须全程使用英文回复。回复中绝不能出现任何中文字符——若某个概念必须用中文，请转写为拼音或翻译成英文。即使数据集样本中含有中文，你仍然只用英文回复。
-- **称呼：** 始终称呼用户为 “Sir” 或 “Master”。
-- **Emoji：** 回复中不得包含任何emoji
-```
 
 ### 林妹妹（Lin Meimei）System Prompt
 
@@ -355,7 +343,11 @@ scripts\start.bat
 - **贾维斯**：说"贾维斯"或"加维斯"
 - **林妹妹**：说"林妹妹何在"
 
-听到确认音效和角色专属欢迎语后，即可开始对话。
+唤醒后助手会自动向主脑引擎发送一条 `voice-assistant-wake-up-<本地时间戳>` 消息，
+由引擎返回的内容作为问候语播报（不再是写死的欢迎语）。听到问候后即可开始对话。
+
+> 需在角色 system prompt 里加一条对该消息的应答规则，否则引擎可能把它当普通输入。
+> 详见 [hermes-assistant.md](./hermes-assistant.md) 第四节（OpenClaw 模式同样适用）。
 
 #### 2. 说出指令
 
@@ -540,9 +532,37 @@ l i n m e i m e i z a i m a :3.0 #0.02 @林妹妹在吗
 
 > **音效格式建议**：16-bit, 44100Hz, 单声道，长度 0.5-2 秒
 
+### 主脑引擎选择（OpenClaw / Hermes）
+
+`assistants.json` **顶层** `engine` 字段决定用哪个主脑引擎对接大模型：
+
+```json
+{
+    "engine": "openclaw",   // 默认；可选 "hermes"
+    "default": "jarvis",
+    "assistants": [ ... ]
+}
+```
+
+- `openclaw`（默认，缺省或未知值都回退到它）：走 OpenClaw Gateway。
+- `hermes`：本地 Hermes 作主脑，一角色一 profile 一网关。配置/启动/排错见
+  [hermes-assistant.md](./hermes-assistant.md)。
+
+### 特效调试模式（overlay_debug_mode）
+
+`assistants.json` 顶层 `overlay_debug_mode` 为 `true` 时，召唤出来的 HUD 特效**不再自动隐藏/清空**，
+方便对着调样式；正常使用保持 `false`。
+
+```json
+{
+    "overlay_debug_mode": false,
+    "assistants": [ ... ]
+}
+```
+
 ## 高级功能
 
-### 声纹录入
+### 声纹录入(macos用户请直接下载control_center.dmg安装后在应用内录入)
 
 > **前提**：需下载声纹嵌入模型 `3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx` 放入 `models/` 目录（见上方模型表格第 7 项），否则录入会报错 `No graph was found in the protobuf`。
 
@@ -576,6 +596,8 @@ FastAPI
 
 ### API 接口
 
+本地 HTTP 接口监听 `127.0.0.1:18790`（控制中心也通过它联动语音助手）。
+
 **远程退出：**
 
 ```bash
@@ -586,6 +608,19 @@ curl -X POST http://127.0.0.1:18790/exit
 ```json
 {"status": "ok"}
 ```
+
+**勿扰模式（声纹录入时暂停唤醒）：**
+
+录入声纹时若不静音唤醒词，反复念“贾维斯”会误唤醒。控制中心“声纹注册”会自动调用，
+也可手动控制：
+
+```bash
+curl -X POST http://127.0.0.1:18790/dnd          # 进入勿扰：暂停唤醒词响应
+curl -X POST http://127.0.0.1:18790/dnd/disable  # 解除勿扰：恢复唤醒
+```
+
+> 端口被占导致接口未监听时勿扰不会生效（控制中心会在录入日志里给出警告）。
+> 主程序启动绑定该端口已带重试，`start.sh` 也会预清理 18790。
 
 ## 常见问题
 
@@ -628,6 +663,12 @@ curl -X POST http://127.0.0.1:18790/exit
 
 > **Windows 音频说明**：Windows 下使用 `sounddevice` + `soundfile` 进行音频播放（与 macOS 的 `afplay` 方案不同），无需额外安装 `pygame`。
 
+### Q: 日志文件在哪？为什么文件里几乎是空的？
+
+运行日志在 `logs/` 目录（`jarvis_<时间>_<pid>.log`）。**日志文件只记录 ERROR 级及以上**
+（含未捕获异常的 traceback），其余正常输出一律不落盘——所以排查正常流程要看**终端/控制中心**
+的实时输出，文件只用来留底错误。每类日志各保留最近若干份，旧的自动清理。
+
 ---
 
 ## 项目结构
@@ -638,7 +679,8 @@ assistant-x-openclaw/
 │   ├── main.py               # 主程序：唤醒 + 识别 + 对话流程
 │   ├── tts.py                # TTS 统一接口
 │   ├── tts_vits.py           # VITS TTS 引擎
-│   ├── openclaw_bridge.py    # OpenClaw Gateway 桥接
+│   ├── openclaw_bridge.py    # OpenClaw Gateway 桥接（engine=openclaw）
+│   ├── hermes_bridge.py      # Hermes 桥接（engine=hermes，详见 hermes-assistant.md）
 │   ├── audio.py              # 音频播放模块
 │   └── assistants/           # 角色管理系统
 │       ├── manager.py        # Assistant 管理器
