@@ -73,13 +73,20 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
 
 
 def _start_api_server():
-    try:
-        server = HTTPServer(("127.0.0.1", API_PORT), _ExitAPIHandler)
-    except OSError as e:
-        # 端口被僵尸进程占用时（崩溃重启残留），/exit 接口将不可用。
-        # 明确报错而非静默崩线程，便于排查。start.sh 已会预清理该端口。
-        print(f"[API] 退出接口启动失败：端口 {API_PORT} 被占用 ({e})。"
-              f"可 lsof -ti:{API_PORT} | xargs kill 后重启。")
+    # start.sh 清理端口与本进程绑定之间存在竞争窗口（僵尸进程刚退出、TIME_WAIT
+    # 未释放等），单次绑定失败不代表端口长期不可用，重试几次再放弃。
+    server = None
+    last_err = None
+    for attempt in range(5):
+        try:
+            server = HTTPServer(("127.0.0.1", API_PORT), _ExitAPIHandler)
+            break
+        except OSError as e:
+            last_err = e
+            time.sleep(0.5)
+    if server is None:
+        print(f"[API] 退出/勿扰接口启动失败：端口 {API_PORT} 持续被占用 ({last_err})。"
+              f"/exit 与声纹录入的勿扰联动将不可用，可 lsof -ti:{API_PORT} | xargs kill 后重启。")
         return
     server.serve_forever()
 

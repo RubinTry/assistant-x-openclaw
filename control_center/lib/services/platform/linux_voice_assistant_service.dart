@@ -10,7 +10,7 @@ class LinuxVoiceAssistantService implements VoiceAssistantServiceBase {
   @override
   Future<void> stop() async {}
   @override
-  Future<void> setDndMode(bool enabled) async {}
+  Future<bool> setDndMode(bool enabled) async => false;
   @override
   void addLog(String message) {}
   @override
