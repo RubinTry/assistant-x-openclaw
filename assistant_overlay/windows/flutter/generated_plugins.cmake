@@ -3,6 +3,8 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  battery_plus
+  connectivity_plus
   flutter_acrylic
   screen_retriever_windows
   window_manager

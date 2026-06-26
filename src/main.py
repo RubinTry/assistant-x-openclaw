@@ -141,6 +141,15 @@ def _load_engine() -> str:
         return "openclaw"
 
 
+def _load_overlay_debug() -> bool:
+    """读取 assistants.json 顶层 overlay_debug_mode：true 时特效召唤后不隐藏。"""
+    try:
+        with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
+            return bool(json.load(f).get("overlay_debug_mode", False))
+    except Exception:
+        return False
+
+
 _ENGINE = _load_engine()
 if _ENGINE == "hermes":
     from hermes_bridge import get_bridge  # noqa: E402
@@ -949,6 +958,11 @@ class VoiceAssistant:
         self.visual = instance.visual
         self.tts = instance.tts
         set_tts(self.tts)
+
+        # 特效调试模式（assistants.json 顶层 overlay_debug_mode）：
+        # 开启后，召唤出来的特效不再被隐藏/清空，方便调样式
+        if hasattr(self.visual, "set_debug_mode"):
+            self.visual.set_debug_mode(_load_overlay_debug())
 
         print(f"[切换] 已切换到: {self.current_cfg['name']} ({assistant_id})")
         return True
