@@ -15,6 +15,19 @@
             },
             "keywords_file": "keywords/jarvis.txt",
             "asr_mode": "sense_voice_en",
+            "tts_config": {
+                "metallic": {
+                    "enabled": true,
+                    "af": {
+                        "aecho": "0.8:0.85:20|45|70:0.45|0.32|0.12",
+                        "chorus": "0.4:0.6:45:0.2:0.18:1.2",
+                        "bass": "g=4:f=110",
+                        "treble": "g=3.5",
+                        "highpass": "f=80",
+                        "lowpass": "f=9000"
+                    }
+                }
+            },
             "wake_lines": [
                 "Reporting for duty, sir. I'm all ears.",
                 "Good day, sir. Do go on.",

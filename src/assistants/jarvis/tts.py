@@ -17,6 +17,11 @@ from assistants.tts import AssistantTTS
 
 class JarvisTTS(AssistantTTS):
 
+    def __init__(self, config: dict = None):
+        # 注入 assistants.json 的 tts_config（金属感后处理等）到引擎模块
+        from assistants.jarvis import tts_piper
+        tts_piper.configure(config or {})
+
     def is_available(self) -> bool:
         from assistants.jarvis import tts_piper
         return tts_piper.is_available()

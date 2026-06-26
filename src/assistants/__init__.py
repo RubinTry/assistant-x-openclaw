@@ -174,7 +174,7 @@ class AssistantInstance:
         if spec == "jarvis":
             from assistants.jarvis.tts import JarvisTTS
 
-            return JarvisTTS()
+            return JarvisTTS(self._get_sub_config("tts"))
 
         if spec == "custom":
             from assistants.custom_tts import CustomTTS

@@ -6,8 +6,11 @@ Piper TTS 后端 — Jarvis 英音语音合成
 模型: jgkawell/jarvis (Piper VITS, en-GB-x-rp, 22050Hz)
 """
 
+import io
 import logging
 import os
+import shutil
+import subprocess
 import tempfile
 import threading
 
@@ -100,6 +103,117 @@ def _normalize_for_playback(audio: np.ndarray) -> np.ndarray:
     return audio.astype(np.float32)
 
 
+# ── 金属感后处理（ffmpeg）─────────────────────────────────────
+# 由 configure() 从 assistants.json 的 tts_config.metallic 装配为一条 ffmpeg
+# -af 滤镜链字符串（None=不处理）。
+_METALLIC_AF = None
+_FFMPEG_BIN = None  # 缓存解析到的 ffmpeg 绝对路径（False=确认找不到）
+
+
+def configure(config: dict) -> None:
+    """读取 tts_config，装配金属感 ffmpeg 滤镜链。
+
+    config.metallic = {
+        "enabled": true/false,
+        "af": { "aecho": "...", "chorus": "...", "bass": "g=4:f=110",
+                "treble": "g=2.5", "highpass": "f=80", "lowpass": "f=8500" }
+    }
+    af 是对象：键=ffmpeg 滤镜名，值=该滤镜参数。按书写顺序拼成
+    "名=值,名=值,..."。值留空的项会被跳过（便于临时禁用单个滤镜）。
+    """
+    global _METALLIC_AF
+    m = (config or {}).get("metallic") or {}
+    if not m.get("enabled"):
+        _METALLIC_AF = None
+        return
+    af = m.get("af") or {}
+    parts = [f"{name}={val}" for name, val in af.items() if str(val).strip()]
+    _METALLIC_AF = ",".join(parts) if parts else None
+    if _METALLIC_AF:
+        # 启动时检测一次 ffmpeg：没装就给一条可操作提示，并自动回退原声
+        # （不报错、不影响语音助手运行），避免每次合成都刷 warning。
+        if _ffmpeg_bin():
+            logger.info("Jarvis 金属感后处理已启用: %s", _METALLIC_AF)
+        else:
+            logger.warning(
+                "已配置金属感语音(tts_config.metallic)，但 ffmpeg 不可用，"
+                "将使用原始 Piper 原声。正常情况下 pip 包 imageio-ffmpeg 会自带 ffmpeg，"
+                "请确认已 `pip install -r requirements.txt`（或单独 `pip install imageio-ffmpeg`）；"
+                "也可设环境变量 FFMPEG_BIN 指向自有 ffmpeg。"
+            )
+
+
+def _ffmpeg_bin() -> str | None:
+    """解析 ffmpeg 绝对路径。
+
+    优先级（本项目策略：不依赖系统安装/PATH，跨平台一致）：
+      1. FFMPEG_BIN 环境变量（显式覆盖）
+      2. pip 包 imageio-ffmpeg 自带的静态二进制（主路径，macOS/Linux/Windows 通用，
+         随 requirements 一起装；首次调用如未内置会自动下载并缓存）
+      3. 系统 ffmpeg（shutil.which + 常见安装位置，最后兜底）
+    """
+    global _FFMPEG_BIN
+    if _FFMPEG_BIN is not None:
+        return _FFMPEG_BIN or None
+
+    cand = os.environ.get("FFMPEG_BIN")
+
+    # 主路径：pip 自带的静态 ffmpeg
+    if not cand:
+        try:
+            import imageio_ffmpeg
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+            if exe and os.path.isfile(exe):
+                cand = exe
+        except Exception as e:
+            logger.debug("imageio-ffmpeg 不可用，回退系统 ffmpeg: %s", e)
+
+    # 兜底：系统 ffmpeg
+    if not cand:
+        cand = shutil.which("ffmpeg")
+    if not cand:
+        for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg",
+                  "/usr/bin/ffmpeg"):
+            if os.path.isfile(p):
+                cand = p
+                break
+
+    _FFMPEG_BIN = cand or False
+    if cand:
+        logger.info("金属处理使用 ffmpeg: %s", cand)
+    return cand
+
+
+def _apply_metallic(audio: np.ndarray, sr: int) -> tuple[np.ndarray, int]:
+    """把音频过一遍 ffmpeg 金属链。失败/无 ffmpeg 时原样返回，不阻断合成。"""
+    if not _METALLIC_AF:
+        return audio, sr
+    ff = _ffmpeg_bin()
+    if not ff:
+        # 未装 ffmpeg：configure() 已在启动时给过一次可操作提示，这里静默回退原声
+        return audio, sr
+    try:
+        buf = io.BytesIO()
+        sf.write(buf, audio, sr, format="WAV", subtype="FLOAT")
+        proc = subprocess.run(
+            [ff, "-hide_banner", "-loglevel", "error",
+             "-f", "wav", "-i", "pipe:0", "-af", _METALLIC_AF,
+             "-f", "wav", "pipe:1"],
+            input=buf.getvalue(), capture_output=True,
+        )
+        if proc.returncode != 0 or not proc.stdout:
+            logger.warning("金属处理失败，用原声: %s",
+                           proc.stderr.decode("utf-8", "ignore")[:200])
+            return audio, sr
+        out, osr = sf.read(io.BytesIO(proc.stdout), dtype="float32")
+        if out.ndim > 1:
+            out = out.mean(axis=1)
+        return out.astype(np.float32), osr
+    except Exception as e:
+        logger.warning("金属处理异常，用原声: %s", e)
+        return audio, sr
+
+
 def _synthesize_raw(text: str) -> tuple[np.ndarray, int] | None:
     """合成文本为 float32 音频数组"""
     from piper import SynthesisConfig
@@ -116,6 +230,7 @@ def _synthesize_raw(text: str) -> tuple[np.ndarray, int] | None:
     audio = np.concatenate(all_audio)
     sr = voice.config.sample_rate
     audio = _trim_silence(audio, sr)
+    audio, sr = _apply_metallic(audio, sr)  # 金属感后处理（启用时）
     audio = _normalize_for_playback(audio)
     return (audio, sr)
 

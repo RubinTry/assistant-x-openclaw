@@ -73,7 +73,14 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
 
 
 def _start_api_server():
-    server = HTTPServer(("127.0.0.1", API_PORT), _ExitAPIHandler)
+    try:
+        server = HTTPServer(("127.0.0.1", API_PORT), _ExitAPIHandler)
+    except OSError as e:
+        # 端口被僵尸进程占用时（崩溃重启残留），/exit 接口将不可用。
+        # 明确报错而非静默崩线程，便于排查。start.sh 已会预清理该端口。
+        print(f"[API] 退出接口启动失败：端口 {API_PORT} 被占用 ({e})。"
+              f"可 lsof -ti:{API_PORT} | xargs kill 后重启。")
+        return
     server.serve_forever()
 
 
@@ -102,7 +109,10 @@ from tts import (
     stop_tts,
     set_tts,
 )
-from log_setup import setup_logging
+from log_setup import setup_logging, get_diag_logger
+
+# 文件级诊断/错误日志（只落盘，不进控制中心）
+_diag = get_diag_logger()
 from assistants import (
     AssistantManager,
     AssistantInstance,
@@ -507,6 +517,7 @@ class VoiceAssistant:
         self._stop_openclaw_request = threading.Event()
         self._ignore_next_result = False
         self._suppress_recognition_until_tts_done = False
+        self._last_diag_log = 0.0  # 监听循环诊断日志节流时间戳（文件级，不进控制中心）
         self._last_interrupt_time = 0  # 记录上次打断时间，用于防止误触发
         self._last_wake_time = 0  # 记录上次唤醒时间，唤醒后保护期内跳过退出检测
         self._keyword_stream_reset_event = (
@@ -1211,7 +1222,7 @@ class VoiceAssistant:
         if _is_exit:
             print(f"收到退出指令: {recognition_result.strip()}")
             self._interrupt_openclaw()
-            self._clear_openclaw_context()
+            # self._clear_openclaw_context()
             self.jarvis.on_exit()
             self.visual.clear_texts()
             self.visual.hide_effects()
@@ -1292,25 +1303,32 @@ class VoiceAssistant:
                 audio_stream.start()
 
         def stop_audio_stream():
-            nonlocal audio_stream
-            if audio_stream is not None:
-                try:
-                    audio_stream.stop()
-                    audio_stream.close()
-                except Exception:
-                    pass
-                finally:
-                    audio_stream = None
+            # 【不要再调用 PortAudio 的 stop()/close()】——它们在 macOS CoreAudio 上
+            # 会偶发永久死锁（卡在 C 调用里，try/except 兜不住），是"说完话后一直卡在
+            # listening、不重启不恢复"的根因（尤其打断后 stop→start→端点→又 stop 的
+            # 快速开关流场景）。而 _audio_callback 本就【始终入队】（TTS/处理期间也要
+            # 检测唤醒词打断），即麦克风流本应常开。故这里改为"保持流常开、只清空已
+            # 缓冲音频"——语义等价于原来的"丢弃这段输入"，并彻底规避死锁。
+            # 真正的释放在进程退出时由系统回收。
+            self._clear_queue()
 
         def reset_audio_stream():
+            # 错误恢复路径：可能卡住的 stop()/close() 丢到后台守护线程执行（不阻塞
+            # 主循环），立即置空并重建一个新流。即使旧流的 close 在后台卡死，主循环也
+            # 不受影响。
             nonlocal audio_stream
-            try:
-                if audio_stream is not None:
-                    audio_stream.stop()
-                    audio_stream.close()
-            except Exception:
-                pass
+            old = audio_stream
             audio_stream = None
+            if old is not None:
+                def _close_old(s):
+                    try:
+                        s.stop()
+                        s.close()
+                    except Exception:
+                        pass
+                threading.Thread(target=_close_old, args=(old,), daemon=True).start()
+            self._clear_queue()
+            start_audio_stream()
 
         def _create_vad_stream():
             nonlocal vad_stream
@@ -1687,14 +1705,31 @@ class VoiceAssistant:
                         keyword_stream = self.keyword_spotter.create_stream()
                         continue
 
-                    if self.recognizer.is_endpoint(recognition_stream) or (
-                        recognition_result and silence_duration > 1.5
-                    ):
+                    _ep = self.recognizer.is_endpoint(recognition_stream)
+                    # 文件级诊断（节流 2s，仅落盘、不进控制中心）：专抓"说完话后
+                    # 一直卡在 listening"的现行——记录决定断句的全部变量，下次卡住
+                    # 看 jarvis_diag_*.log 即可判明是哪个条件没满足。
+                    if self.is_awake and (current_time - self._last_diag_log) > 2.0:
+                        self._last_diag_log = current_time
+                        _diag.info(
+                            "LISTEN ep=%s sil=%.1f res_len=%d sup=%s proc=%s busy=%s cont=%s",
+                            _ep, silence_duration, len(recognition_result or ""),
+                            self._suppress_recognition_until_tts_done,
+                            self._is_processing, self._is_openclaw_busy,
+                            self.continuous_mode,
+                        )
+
+                    if _ep or (recognition_result and silence_duration > 1.5):
                         if recognition_result:
                             should_suppress = self._suppress_recognition_until_tts_done
 
                             if should_suppress:
                                 print("[打断] TTS播放中/等待稳定，忽略识别结果")
+                                _diag.warning(
+                                    "断句命中但 suppress=True → 丢弃结果(%r)并继续监听"
+                                    "（若反复出现即 suppress 标志卡死）",
+                                    (recognition_result or "")[:40],
+                                )
                                 recognition_result = ""
                                 recognition_stream = self.recognizer.create_stream()
                                 start_audio_stream()
@@ -1722,7 +1757,7 @@ class VoiceAssistant:
                             if _is_exit:
                                 print(f"收到退出指令: {recognition_result.strip()}")
                                 self._interrupt_openclaw()
-                                self._clear_openclaw_context()
+                                # self._clear_openclaw_context()
                                 stop_audio_stream()
                                 self._clear_queue()
                                 self.jarvis.on_exit()
@@ -2103,7 +2138,7 @@ class VoiceAssistant:
         print("\n[收到退下信号]")
         # 使用静默中断，避免重复发送 /stop 命令
         self._interrupt_openclaw_silent()
-        self._clear_openclaw_context()
+        # self._clear_openclaw_context()
         if hasattr(self, "_waiting_active"):
             self._waiting_active.clear()
         self.jarvis.on_exit()

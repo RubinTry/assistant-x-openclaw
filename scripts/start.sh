@@ -63,7 +63,7 @@ if pgrep -f "jarvis_overlay.*Debug" > /dev/null 2>&1; then
 else
     # 杀掉占用端口的进程
     echo "清理占用端口的进程..."
-    for port in 17888 17889; do
+    for port in 17888 17889 18790; do
         PIDS=$(lsof -ti:$port 2>/dev/null)
         if [ -n "$PIDS" ]; then
             echo " 杀掉占用端口 $port 的进程: $PIDS"
@@ -136,7 +136,7 @@ fi
 
 cleanup() {
     echo "正在关闭..."
-    for port in 17888 17889; do
+    for port in 17888 17889 18790; do
         PIDS=$(lsof -ti:$port 2>/dev/null)
         if [ -n "$PIDS" ]; then
             kill -9 $PIDS 2>/dev/null

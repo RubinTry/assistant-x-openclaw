@@ -11,6 +11,8 @@ sherpa-onnx>=1.9.0
 emoji>=2.0.0
 piper-tts>=1.0.0
 onnxruntime>=1.20.0
+# 金属感语音后处理用：自带跨平台静态 ffmpeg 二进制，免系统安装/PATH
+imageio-ffmpeg>=0.4.9
 
 # OpenClaw 桥接
 requests>=2.28.0
