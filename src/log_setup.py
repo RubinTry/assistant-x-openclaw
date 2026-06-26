@@ -60,17 +60,21 @@ class _Tee:
     def write(self, data):
         stamped = self._stamp(data)
         self._stream.write(stamped)
-        try:
-            self._log.write(stamped)
-        except Exception:
-            pass
+        # log_file 为 None 时只做控制台行首时间戳，不落盘
+        # （日志文件只保留 error 级，见 setup_logging 的 FileHandler）。
+        if self._log is not None:
+            try:
+                self._log.write(stamped)
+            except Exception:
+                pass
 
     def flush(self):
         self._stream.flush()
-        try:
-            self._log.flush()
-        except Exception:
-            pass
+        if self._log is not None:
+            try:
+                self._log.flush()
+            except Exception:
+                pass
 
     def __getattr__(self, name):
         # 透传 isatty/encoding/fileno 等属性，保持终端行为
@@ -114,47 +118,53 @@ def setup_logging(project_dir, keep=15):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = os.path.join(logs_dir, f"jarvis_{ts}_{os.getpid()}.log")
 
-    # 行缓冲，确保崩溃时已写内容不丢失
-    log_file = open(log_path, "a", encoding="utf-8", buffering=1)
-    atexit.register(log_file.close)
-
-    # stdout/stderr 共享同一行首状态，交错写时不会重复盖戳
+    # stdout/stderr 仅做控制台行首时间戳，不再把全部输出落盘——日志文件只保留
+    # error 级（见下方 FileHandler）。终端/控制中心读的是进程 stdout，不受影响。
     _tee_state = {"line_start": True}
-    sys.stdout = _Tee(sys.stdout, log_file, _tee_state)
-    sys.stderr = _Tee(sys.stderr, log_file, _tee_state)
+    sys.stdout = _Tee(sys.stdout, None, _tee_state)
+    sys.stderr = _Tee(sys.stderr, None, _tee_state)
 
-    # 让 logging 走（已被 Tee 的）stdout，与 print 汇入同一文件且顺序一致
+    # 控制台 logging（INFO+，与 print 一起进终端/控制中心，不落盘）
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    handler = logging.StreamHandler(sys.stdout)
+    console = logging.StreamHandler(sys.stdout)
     # 时间戳由 _Tee 统一在行首添加，这里不再带 asctime，避免双重时间戳
-    handler.setFormatter(
+    console.setFormatter(
         logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
     )
     root.handlers.clear()
-    root.addHandler(handler)
+    root.addHandler(console)
 
-    # ── 文件级诊断/错误日志（独立文件，不进控制中心）──────────────
-    # 关键：FileHandler 直接写文件、不经过被 Tee 的 stdout；diag logger
-    # propagate=False 不冒泡到 root，故这些内容只落盘、控制中心看不到。
-    diag_path = os.path.join(logs_dir, f"jarvis_diag_{ts}_{os.getpid()}.log")
-    diag_handler = logging.FileHandler(diag_path, encoding="utf-8")
-    diag_handler.setLevel(logging.DEBUG)
-    diag_handler.setFormatter(
+    # ── 日志文件：只记录 ERROR 及以上，其余一律不落盘 ──────────────
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.ERROR)
+    file_handler.setFormatter(
         logging.Formatter(
             "[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
+    root.addHandler(file_handler)
+    atexit.register(file_handler.close)
+
+    # diag logger 沿用同一份 error 文件（propagate=False，仍只落盘不进控制中心）。
+    # 仅 .error()/.exception() 会写入，.info()/.warning() 一律忽略。
     diag = logging.getLogger(DIAG_LOGGER_NAME)
-    diag.setLevel(logging.DEBUG)
+    diag.setLevel(logging.ERROR)
     diag.handlers.clear()
-    diag.addHandler(diag_handler)
-    diag.propagate = False  # 不冒泡到 root → 不进 stdout → 不进控制中心
-    atexit.register(diag_handler.close)
+    diag.addHandler(file_handler)
+    diag.propagate = False
+
+    # 未捕获异常也写进 error 文件，避免崩溃信息只出现在终端
+    def _log_uncaught(exc_type, exc, tb):
+        if not issubclass(exc_type, KeyboardInterrupt):
+            logging.getLogger("jarvis.uncaught").error(
+                "未捕获异常", exc_info=(exc_type, exc, tb)
+            )
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = _log_uncaught
 
     _cleanup_old_logs(logs_dir, keep)
-    print(f"[日志] 运行日志: {log_path}")
-    print(f"[日志] 诊断/错误日志(仅落盘): {diag_path}")
-    diag.info("诊断日志初始化完成 pid=%s", os.getpid())
+    print(f"[日志] 错误日志(仅 error 落盘): {log_path}")
     return log_path
