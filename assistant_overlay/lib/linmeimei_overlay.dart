@@ -398,4 +398,9 @@ class LinMeimeiPet implements AgentVisual {
   Widget buildOtherOne(BuildContext context, double screenWidth, double screenHeight) {
     return SizedBox();
   }
+
+  @override
+  Widget buildOtherTwo(BuildContext context, double screenWidth, double screenHeight) {
+    return SizedBox();
+  }
 }

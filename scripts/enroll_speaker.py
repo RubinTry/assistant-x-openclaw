@@ -90,17 +90,13 @@ def create_recognizer():
         feature_dim=80,
         decoding_method="greedy_search",
         provider=args.provider,
+        # 开启端点检测：增量喂入时用静音停顿来切句，
+        # 每念一次「贾维斯」之间的停顿即触发一次端点，吐出该次结果。
+        enable_endpoint_detection=True,
+        rule1_min_trailing_silence=2.4,
+        rule2_min_trailing_silence=0.8,
+        rule3_min_utterance_length=20,
     )
-
-
-def recognize_audio(samples, sample_rate, recognizer):
-    """识别音频为文字"""
-    stream = recognizer.create_stream()
-    stream.accept_waveform(sample_rate, samples)
-    while recognizer.is_ready(stream):
-        recognizer.decode_stream(stream)
-    result = recognizer.get_result(stream)
-    return result if result else ""
 
 
 def enroll_speaker():
@@ -159,23 +155,44 @@ def enroll_speaker():
         )
 
         recognized_texts = []
-        chunk_size = sample_rate
+
+        # 单 stream 增量喂入：每秒只喂"新增"的那一段音频，靠端点检测切句。
+        # 比每秒重建 stream、重喂整段累积音频省 CPU（O(n) 而非 O(n²)）。
+        stream = recognizer.create_stream()
+        last_pos = 0
 
         for i in range(duration, 0, -1):
             log(f"录音中... {i}秒")
             time.sleep(1)
 
             current_pos = int((duration - i) * sample_rate)
-            if current_pos > 0:
-                chunk = recording[:current_pos].flatten()
-                if len(chunk) >= chunk_size:
-                    text = recognize_audio(chunk, sample_rate, recognizer)
-                    if text and text not in recognized_texts:
+            if current_pos > last_pos:
+                chunk = recording[last_pos:current_pos].flatten()
+                last_pos = current_pos
+                stream.accept_waveform(sample_rate, chunk)
+                while recognizer.is_ready(stream):
+                    recognizer.decode_stream(stream)
+                # 一次停顿（端点）= 一次完整的「贾维斯」，吐出并重置
+                if recognizer.is_endpoint(stream):
+                    text = recognizer.get_result(stream)
+                    if text:
                         recognized_texts.append(text)
                         log(f"  识别: {text}")
+                    recognizer.reset(stream)
 
         log("录音完成！")
         sd.wait()
+
+        # 末尾再补一段尾部静音并 input_finished()，把最后一次还没触发端点的结果刷出来
+        tail = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
+        stream.accept_waveform(sample_rate, tail)
+        stream.input_finished()
+        while recognizer.is_ready(stream):
+            recognizer.decode_stream(stream)
+        text = recognizer.get_result(stream)
+        if text:
+            recognized_texts.append(text)
+            log(f"  识别: {text}")
 
         log("\n" + "=" * 50)
         log("识别结果:")

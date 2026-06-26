@@ -121,7 +121,8 @@ class _AgentOverlayState extends State<AgentOverlay>
             agent.buildAiTerminal(context, screenWidth, screenHeight),
             agent.buildUserTerminal(context, screenWidth, screenHeight),
             agent.buildEffects(context, screenWidth, screenHeight),
-            agent.buildOtherOne(context, screenWidth, screenHeight)
+            agent.buildOtherOne(context, screenWidth, screenHeight),
+            agent.buildOtherTwo(context, screenWidth, screenHeight)
           ],
         );
       }).toList(),

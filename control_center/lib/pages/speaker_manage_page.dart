@@ -261,8 +261,16 @@ class _EnrollDialogState extends State<_EnrollDialog> {
   }
 
   Future<void> _startEnroll() async {
-    // 录入期间进入勿扰：暂停主程序唤醒词响应，避免录音时反复喊"贾维斯"误唤醒
-    await _vaService.setDndMode(true);
+    // 录入期间进入勿扰：暂停主程序唤醒词响应，避免录音时反复喊"贾维斯"误唤醒。
+    // 若主程序 18790 接口没监听（端口被占、进程未起等），勿扰请求会静默失败——
+    // 必须显式提示出来，否则用户会以为是声纹逻辑本身的 bug。
+    final dndOk = await _vaService.setDndMode(true);
+    if (!dndOk) {
+      const msg = '[警告] 未能联系主程序开启勿扰模式（18790 端口无响应），'
+          '念出唤醒词可能会误唤醒助手，建议重启语音助手后再试';
+      widget.onLog?.call(msg);
+      if (mounted) setState(() => _logs.add(msg));
+    }
     try {
       await for (final msg in _service.enrollSpeakerStream()) {
         widget.onLog?.call(msg);

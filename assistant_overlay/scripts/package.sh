@@ -6,6 +6,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_NAME="assistant_overlay"
 BUILD_TYPE=${BUILD_TYPE:-release}
 
+rm -rf *.dmg
+
 echo "Building $PROJECT_NAME ($BUILD_TYPE)..."
 cd "$PROJECT_DIR"
 flutter build macos --$BUILD_TYPE
@@ -27,3 +29,6 @@ create-dmg \
     "$APP_PATH"
 
 echo "Done: $OUTPUT_DMG"
+open *.dmg
+
+flutter clean

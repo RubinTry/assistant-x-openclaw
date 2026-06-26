@@ -55,6 +55,8 @@ TONY STARK :3.5
 T O N Y  S T A R K :3.5
 CLAUDE CODE :3.5
 CODEX :2.0
+JARVIS :2.5
+贾 维 斯
 PLAY SOME MUSIC
 英 语 互 聊
 英 语 互 聊 模 式

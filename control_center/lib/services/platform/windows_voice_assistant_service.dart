@@ -229,7 +229,7 @@ class WindowsVoiceAssistantService implements VoiceAssistantServiceBase {
   }
 
   @override
-  Future<void> setDndMode(bool enabled) async {
+  Future<bool> setDndMode(bool enabled) async {
     // Python 端 18790 是 HTTP server（do_POST 认 /dnd、/dnd/disable）。
     // 必须发真正的 HTTP POST；裸 TCP 字符串会被当成畸形请求丢弃，DND 不会生效。
     try {
@@ -241,7 +241,10 @@ class WindowsVoiceAssistantService implements VoiceAssistantServiceBase {
       final resp = await req.close();
       await resp.drain<void>();
       client.close();
-    } catch (_) {}
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override

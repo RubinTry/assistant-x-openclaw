@@ -1,4 +1,4 @@
-# Assistant-X-OpenClaw
+# Assistant-X-OpenClaw 
 
 > ![妈妈我再也不用羡慕钢铁侠了](./docs/jarvis.png)
 
@@ -97,6 +97,49 @@ openclaw agents add lin-meimei
 > ⚠️ **配置验证**：添加 Prompt 后，请在 OpenClaw Web UI 中确认已写入对应智能体的 SOUL.md、IDENTITY.md 等文件中。如未生效，请让 OpenClaw 重新更新规则。
 >
 > ![Tool edit图](./docs/tool_edit.png)
+
+### 贾维斯金属感语音（可选）
+
+贾维斯的英文嗓由 Piper 合成，可在 `assistants.json` 中给它叠加一层「金属/机械感」后处理。原理是把合成好的音频再过一遍 **ffmpeg 滤镜链**（与 TTS 模型本身无关，对任何输出都通用），无需换模型、纯本地、几乎零延迟。
+
+在 `jarvis` 角色下配置 `tts_config.metallic`：
+
+```jsonc
+"tts_config": {
+  "metallic": {
+    "enabled": true,                 // 总开关；false 即回到纯 Piper 原声
+    "af": {                          // 每个成员是一个 ffmpeg 滤镜：键=滤镜名，值=参数
+      "aecho":    "0.8:0.85:20|45|70:0.45|0.32|0.22", // 多抽头回声 → 金属共鸣 + 混响尾
+      //   aecho 格式: in_gain:out_gain:delays_ms|delay_ms|...:decays|decay|...
+      //     in_gain / out_gain : 输入/输出音量 (0~1)
+      //     delays             : 用 | 分隔的多个延迟 (毫秒)，每项对应一个回声抽头
+      //     decays             : 用 | 分隔的多个衰减 (0~1)，顺序对齐 delays；越小尾巴越短
+      "chorus":   "0.4:0.6:45:0.2:0.18:2",            // 合唱 → 机械失谐/加厚
+      //   chorus 格式: in_gain:out_gain:delay_ms:decay:depth_hz:mod_rate_hz
+      //     in_gain / out_gain : 输入/输出音量 (0~1)
+      //     delay_ms           : 基础延迟 (毫秒)，失谐的核心
+      //     decay              : 反馈衰减 (0~1)，越大尾巴越长
+      //     depth_hz           : 调制深度 (Hz)，越大失谐越夸张
+      //     mod_rate_hz        : 调制速率 (Hz)，控制"飘"的速度
+      "bass":     "g=4:f=110",                        // 低频增益 → 浑厚胸腔感（g 越大越厚）
+      "treble":   "g=2.5",                            // 高频增益 → 金属光泽（g 越大越亮）
+      "highpass": "f=80",                             // 高通 → 切掉超低频（越高越单薄）
+      "lowpass":  "f=8500"                             // 低通 → 切掉超高频（越低越像对讲机）
+    }
+  }
+}
+```
+
+调法：
+
+- 想调某个效果，改对应成员的值即可；按书写顺序拼成 ffmpeg `-af` 链。
+- 想去掉某个滤镜：删掉该行，或把值留空（会自动跳过）。
+- 金属感太强 → 调小 `aecho` 衰减、`chorus` 深度；太弱 → 调大 `treble` 的 `g`、加重 `aecho`。
+- 改完**重启**生效（配置在角色创建时读取）。
+- **依赖 `ffmpeg`（可选）**：金属感后处理需要 ffmpeg。**没装也不会报错**——会自动回退到纯 Piper 原声，仅在启动日志给一条提示。需要金属效果时安装：
+  - macOS：`brew install ffmpeg`
+  - Ubuntu/Debian：`sudo apt install ffmpeg`
+  - 或设环境变量 `FFMPEG_BIN` 指向 ffmpeg 可执行文件（GUI 启动时 PATH 缺 `/opt/homebrew/bin` 的情况已自动兜底常见安装位置）。
 
 ## 项目亮点
 

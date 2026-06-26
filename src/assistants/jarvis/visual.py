@@ -19,6 +19,13 @@ class JarvisVisual(AssistantVisual):
         self.connected = False
         self._connect_thread = None
         self._running = True
+        # 特效调试模式：true 时召唤出来的特效不再被隐藏/清空（便于调样式）
+        self.debug_mode = False
+
+    def set_debug_mode(self, enabled: bool):
+        self.debug_mode = bool(enabled)
+        if self.debug_mode:
+            logger.info("Overlay 调试模式开启：特效召唤后不再隐藏/清空")
 
     def _connect(self):
         while self._running:
@@ -86,9 +93,13 @@ class JarvisVisual(AssistantVisual):
         self.send("wake")
 
     def hide_effects(self):
+        if self.debug_mode:
+            return  # 调试模式：召唤后保持显示，不隐藏
         self.send("hide")
 
     def clear_texts(self):
+        if self.debug_mode:
+            return  # 调试模式：保留文本，便于调终端框样式
         self.send("user:")
         self.send("ai:")
 
