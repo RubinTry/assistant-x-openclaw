@@ -1,6 +1,6 @@
 {
     "engine_comment": "主脑引擎，可选值：openclaw（默认）、hermes",
-    "engine": "openclaw",
+    "engine": "hermes",
     "default": "jarvis",
     "overlay_debug_mode": false,
     "assistants": [
@@ -23,9 +23,9 @@
                         "aecho": "0.8:0.85:20|45|70:0.45|0.32|0.12",
                         "chorus": "0.4:0.6:45:0.2:0.18:1.2",
                         "bass": "g=4:f=110",
-                        "treble": "g=3.5",
-                        "highpass": "f=80",
-                        "lowpass": "f=9000"
+                        "treble": "g=2.5",
+                        "highpass": "f=90",
+                        "lowpass": "f=8500"
                     }
                 }
             },

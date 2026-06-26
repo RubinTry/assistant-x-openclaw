@@ -847,7 +847,7 @@ class JarvisAgentVisual implements AgentVisual {
                         child: JarvisSequencePlayer(
                           assetDir: 'assets/jarvis', // 只需要指定目录
                           assetSuffix: '.png',
-                          fps: 24,
+                          fps: 30,
                         ),
                       );
                     },

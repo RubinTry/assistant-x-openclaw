@@ -1622,16 +1622,28 @@ class VoiceAssistant:
                                 speech_started = False
 
                             self.visual.show_wake_effect()
-                            self._suppress_recognition_until_tts_done = True
-                            self._tts_start_time = time.time()
-                            tts_thread = threading.Thread(
-                                target=play_prebuilt_voice,
-                                args=("wake", _random_wake_line()),
-                                daemon=True,
-                            )
-                            tts_thread.start()
-                            tts_thread.join()
+                            # 【实验】唤醒后不再播报固定话术，改为自动给后端引擎发一条
+                            # "voice-assistant-wake-up"，由引擎返回的内容作为问候播报。
+                            # _on_recognized 内部会置 _is_processing=True，且此处同步阻塞、
+                            # 麦克风流处于停止态，故等待引擎回复期间不识别用户语音。
+                            # —— 原固定话术 TTS 暂注释保留，便于回退 ——
+                            # self._suppress_recognition_until_tts_done = True
+                            # self._tts_start_time = time.time()
+                            # tts_thread = threading.Thread(
+                            #     target=play_prebuilt_voice,
+                            #     args=("wake", _random_wake_line()),
+                            #     daemon=True,
+                            # )
+                            # tts_thread.start()
+                            # tts_thread.join()
+                            # 时间戳由 Python 端发送前直接读取本地时间，避免后端
+                            # （hermes）自行取时常出错；附在消息末尾随唤醒一起带给引擎。
+                            _wake_ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                            self._on_recognized(f"voice-assistant-wake-up-{_wake_ts}")
 
+                            # _on_recognized 全程同步阻塞、麦克风停止，期间不识别用户语音；
+                            # 返回后必须复位 suppress（它在上方 1597 行附近被置 True），否则
+                            # 后续用户每句识别结果都会被丢弃，最终静音超时误退出。
                             self._suppress_recognition_until_tts_done = False
                             self._ignore_next_result = False
                             self._last_wake_time = (
