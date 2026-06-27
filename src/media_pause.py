@@ -143,3 +143,20 @@ def get_media_controller() -> MediaController:
         if _controller is None:
             _controller = MediaController()
         return _controller
+
+
+# ── 激活联动钩子 ──────────────────────────────────────────
+try:
+    from lifecycle import LifecycleHook
+except ImportError:  # 允许 media_pause 被单独导入/测试
+    LifecycleHook = object
+
+
+class MediaPauseHook(LifecycleHook):
+    """激活时暂停在播媒体，退回待机时恢复（仅恢复本程序暂停的）。"""
+
+    def on_wake(self):
+        get_media_controller().pause()
+
+    def on_standby(self):
+        get_media_controller().resume()
