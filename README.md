@@ -124,10 +124,10 @@ openclaw agents add lin-meimei
 - 想去掉某个滤镜：删掉该行，或把值留空（会自动跳过）。
 - 金属感太强 → 调小 `aecho` 衰减、`chorus` 深度；太弱 → 调大 `treble` 的 `g`、加重 `aecho`。
 - 改完**重启**生效（配置在角色创建时读取）。
-- **依赖 `ffmpeg`（可选）**：金属感后处理需要 ffmpeg。**没装也不会报错**——会自动回退到纯 Piper 原声，仅在启动日志给一条提示。需要金属效果时安装：
-  - macOS：`brew install ffmpeg`
-  - Ubuntu/Debian：`sudo apt install ffmpeg`
-  - 或设环境变量 `FFMPEG_BIN` 指向 ffmpeg 可执行文件（GUI 启动时 PATH 缺 `/opt/homebrew/bin` 的情况已自动兜底常见安装位置）。
+- **ffmpeg 依赖：随 pip 自带，无需系统安装**。`requirements.txt` 已含 `imageio-ffmpeg`，它会带一份跨平台（macOS/Linux/Windows）静态 ffmpeg 二进制，`pip install -r requirements.txt` 装完即可用，**免 brew/apt、免折腾 PATH**。
+  - 解析优先级见 [tts_piper.py](src/assistants/jarvis/tts_piper.py)：① pip 包 imageio-ffmpeg（主路径）→ ② 系统 ffmpeg（`shutil.which` + 常见安装位置，兜底）。
+  - 万一两者都没有，**也不会报错**——自动回退纯 Piper 原声，仅在启动日志给一条提示。
+  - 可选覆盖：设环境变量 `FFMPEG_BIN` 指向自定义 ffmpeg 可执行文件。
 
 ## 项目亮点
 
@@ -283,8 +283,8 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 
 | # | 模型 | 下载链接 |
 |---|------|----------|
-| 7 | Qwen3-ASR 离线识别模型 | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
-| 8 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
+| 8 | Qwen3-ASR 离线识别模型 | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
+| 9 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
 
 ### 5. 准备音效文件（看看就行，懒得换音效的话不用研究）
 
@@ -590,8 +590,10 @@ l i n m e i m e i z a i m a :3.0 #0.02 @林妹妹在吗
 
 ## 高级功能
 
-### 声纹录入(macos用户请直接下载control_center.dmg安装后在应用内录入)
+### 声纹录入（可选）
 
+> **macOS 用户**：直接下载 `control_center.dmg`，安装后在应用内录入即可，无需手动跑下面的脚本。
+>
 > **前提**：需下载声纹嵌入模型 `3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx` 放入 `models/` 目录（见上方模型表格第 7 项），否则录入会报错 `No graph was found in the protobuf`。
 
 用于验证说话人身份（未来可扩展声纹验证）：
@@ -707,16 +709,21 @@ assistant-x-openclaw/
 │   ├── main.py               # 主程序：唤醒 + 识别 + 对话流程
 │   ├── tts.py                # TTS 统一接口
 │   ├── tts_vits.py           # VITS TTS 引擎
-│   ├── openclaw_bridge.py    # OpenClaw Gateway 桥接（engine=openclaw）
+│   ├── openclaw_bridge_websocket.py  # OpenClaw Gateway 桥接（engine=openclaw）
 │   ├── hermes_bridge.py      # Hermes 桥接（engine=hermes，详见 hermes-assistant.md）
+│   ├── lifecycle.py          # 激活联动钩子注册表（唤醒/休眠边沿派发）
+│   ├── media_pause.py        # 激活联动：唤醒时暂停媒体
+│   ├── dock_control.py       # 激活联动：唤醒时隐藏 Dock（macOS）
 │   ├── audio.py              # 音频播放模块
-│   └── assistants/           # 角色管理系统
-│       ├── manager.py        # Assistant 管理器
-│       ├── jarvis_feedback.py    # 贾维斯反馈系统
-│       ├── linmeimei_feedback.py # 林妹妹反馈系统
-│       └── ...
+│   └── assistants/           # 角色系统
+│       ├── feedback.py       # 反馈系统基类（音效 + HUD + 通知）
+│       ├── visual.py         # HUD 视觉基类
+│       ├── tts.py            # 角色 TTS 基类
+│       ├── jarvis/           # 贾维斯角色（visual/tts/feedback 等）
+│       ├── lin_meimei/       # 林妹妹角色
+│       └── custom_*.py       # 自定义角色模板
 ├── scripts/                  # 工具脚本
-│   ├── start.sh              # 启动脚本（macOS/Linux）
+│   ├── start.sh              # 启动脚本（macOS）
 │   ├── start.bat             # 启动脚本（Windows）
 │   └── enroll_speaker.py     # 声纹录入工具
 ├── assistant_overlay/        # Flutter HUD 视觉特效应用
