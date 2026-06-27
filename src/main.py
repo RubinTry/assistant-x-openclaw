@@ -117,6 +117,9 @@ from tts import (
     set_tts,
 )
 from log_setup import setup_logging, get_diag_logger
+from lifecycle import get_lifecycle_manager
+from media_pause import MediaPauseHook
+from dock_control import DockAutohideHook
 
 # 文件级诊断/错误日志（只落盘，不进控制中心）
 _diag = get_diag_logger()
@@ -146,6 +149,15 @@ def _load_overlay_debug() -> bool:
     try:
         with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
             return bool(json.load(f).get("overlay_debug_mode", False))
+    except Exception:
+        return False
+
+
+def _load_dock_autohide() -> bool:
+    """读取 assistants.json 顶层 dock_autohide_on_wake：true 时激活期自动隐藏 Dock。"""
+    try:
+        with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
+            return bool(json.load(f).get("dock_autohide_on_wake", False))
     except Exception:
         return False
 
@@ -503,6 +515,15 @@ class VoiceAssistant:
         self._switch_assistant(default_cfg["id"])
 
         self.sample_rate = 16000
+        # 激活生命周期联动：is_awake 是 property（见下），在 False↔True
+        # 边沿自动派发钩子。先建注册表并接入已有联动（暂停媒体），
+        # 再触发首次赋值——此时 manager 已就绪。
+        self._is_awake = False
+        self._lifecycle = get_lifecycle_manager()
+        self._lifecycle.register(MediaPauseHook())
+        if _load_dock_autohide():
+            self._lifecycle.register(DockAutohideHook())
+            print("[Dock] 激活期自动隐藏 Dock：已启用（dock_autohide_on_wake）")
         self.is_awake = False
         self.continuous_mode = False
         self.audio_queue = queue.Queue()
@@ -681,6 +702,24 @@ class VoiceAssistant:
             print(f"[声纹] 唤醒时将验证说话人身份")
         else:
             print("[声纹] 没有成功加载任何声纹，禁用验证")
+
+    @property
+    def is_awake(self) -> bool:
+        return self._is_awake
+
+    @is_awake.setter
+    def is_awake(self, value: bool):
+        """激活态写入口：仅在 False↔True 边沿派发生命周期联动钩子。
+
+        全项目所有 `self.is_awake = X` 都经由此处，重复赋值不会重复触发，
+        看门狗强制回待机、重启等角落也天然纳管。新增联动只需 register，
+        主流程无需改动。
+        """
+        value = bool(value)
+        changed = value != self._is_awake
+        self._is_awake = value
+        if changed:
+            self._lifecycle.notify(value)
 
     def _init_vad_config(self):
         """初始化 VAD 配置（用于待机时轻量级语音检测）"""

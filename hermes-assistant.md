@@ -117,6 +117,9 @@ voice-assistant-wake-up-<本地时间戳>
 | 桥接模块 | `src/openclaw_bridge_websocket.py` | `src/hermes_bridge.py` |
 | 启动额外步骤 | 无 | start.sh 自动 provision 各角色网关 |
 | 端点配置 | 网关地址 | 从 `~/.hermes/profiles/<id>/.env` 自解析 |
+| 激活联动（媒体暂停 / Dock 自动隐藏） | 完全一致 | 完全一致 |
+
+> **激活联动与引擎无关**：唤醒时暂停媒体、隐藏 Dock 由 `src/lifecycle.py` 钩子驱动，跟主脑是 OpenClaw 还是 Hermes 没有任何关系。开关（`dock_autohide_on_wake`）、macOS 自动化授权坑、扩展方式等，全部见 [README.md](./README.md) 的「激活联动」一节，此处不重复。
 
 ---
 

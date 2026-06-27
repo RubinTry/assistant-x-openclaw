@@ -32,5 +32,7 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>语音助手需要使用麦克风进行语音识别</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>语音助手在被激活时需要控制“系统事件”以自动隐藏/还原程序坞（Dock）</string>
 </dict>
 </plist>

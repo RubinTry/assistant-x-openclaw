@@ -560,6 +560,34 @@ l i n m e i m e i z a i m a :3.0 #0.02 @林妹妹在吗
 }
 ```
 
+### 激活联动（唤醒时自动隐藏 Dock / 暂停媒体）
+
+助手"被唤醒 → 退回待机"这两个时刻，可以联动触发一些系统动作。目前内置两项（均仅 macOS、软失败、退待机自动还原）：
+
+| 联动 | 开关 | 默认 | 依赖 |
+| --- | --- | --- | --- |
+| 唤醒时暂停正在播放的影视/音乐 | 自动（无需配置） | 开 | `brew install media-control` |
+| 唤醒时把系统 Dock 切到自动隐藏 | `dock_autohide_on_wake` | 关 | macOS 自动化授权（见下） |
+
+```json
+{
+    "dock_autohide_on_wake": true,   // 顶层；改完需重启助手才生效
+    "assistants": [ ... ]
+}
+```
+
+两者都遵循「**只还原我改的**」：你本来就开着 Dock 自动隐藏、或当时没有媒体在播，助手绝不会擅自改动。
+
+> **Dock 自动隐藏的授权坑（首次必看）**
+> 切 Dock 走的是 AppleScript 控制「系统事件」，需要 macOS 的**自动化授权**。由于助手是被**控制中心** App 拉起的，授权弹窗会归到控制中心头上，因此：
+> 1. 控制中心的 `Info.plist` 必须带 `NSAppleEventsUsageDescription`（本仓库已加）——**改的是源码，必须重新 `flutter build macos` 并覆盖安装 `/Applications/control_center.app` 才进包**；
+> 2. 打开开关后**重启助手**，首次唤醒时会弹「控制中心想要控制"系统事件"」，点**好**即永久生效；
+> 3. 若死活不弹窗，多半是缓存了静默拒绝，执行 `tccutil reset AppleEvents cn.rubintry.assistant.ctrl.center.controlCenter` 清掉再重试。
+>
+> 注意：autohide 只是"鼠标离开屏幕边缘就收起"，把鼠标怼到屏幕底边 Dock 仍会冒出来——要彻底不露需用 overlay 窗口层级遮挡，暂未实现。
+
+> **想加新联动？** 联动注册表在 `src/lifecycle.py`：实现 `LifecycleHook` 的 `on_wake` / `on_standby` 并 `register` 即可，主循环无需改动（`is_awake` 已是边沿触发的 property）。媒体暂停、Dock 隐藏都是这么接入的。
+
 ## 高级功能
 
 ### 声纹录入(macos用户请直接下载control_center.dmg安装后在应用内录入)
