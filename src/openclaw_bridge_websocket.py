@@ -702,6 +702,11 @@ class OpenClawBridgeWebSocket:
             logger.warning("RPC 超时 method=%s", method)
         return resp
 
+    def _session_key(self) -> str:
+        # 会话按小时滚动：agent:<id>:<ns>:<YYYYMMDDHH>。每过一小时自动新建会话，
+        # 老会话留底可被检索，避免单一长存会话无限膨胀（拖慢并撑爆后端额度）。
+        return f"agent:{self.agent_id}:{self.namespace}:{time.strftime('%Y%m%d%H')}"
+
     # ─────────────────────────────────────────────────────────────────
     # 异步 control 命令（chat.abort / sessions.reset / sessions.compact）
     # ─────────────────────────────────────────────────────────────────
@@ -710,7 +715,7 @@ class OpenClawBridgeWebSocket:
         try:
             if not self._ensure_connected():
                 return
-            session_key = f"agent:{self.agent_id}:{self.namespace}"
+            session_key = self._session_key()
             resp = self._rpc("chat.abort", {"sessionKey": session_key}, timeout=8)
             if resp is None:
                 logger.warning("chat.abort 超时")
@@ -727,7 +732,7 @@ class OpenClawBridgeWebSocket:
         try:
             if not self._ensure_connected():
                 return
-            session_key = f"agent:{self.agent_id}:{self.namespace}"
+            session_key = self._session_key()
             # sessions.reset 清空消息历史但保留 session 元数据；与 /clear 语义一致
             resp = self._rpc("sessions.reset", {"key": session_key}, timeout=10)
             if resp is None:
@@ -745,7 +750,7 @@ class OpenClawBridgeWebSocket:
         try:
             if not self._ensure_connected():
                 return
-            session_key = f"agent:{self.agent_id}:{self.namespace}"
+            session_key = self._session_key()
             resp = self._rpc(
                 "sessions.compact",
                 {"key": session_key, "keepRecent": keep_recent},
@@ -799,7 +804,7 @@ class OpenClawBridgeWebSocket:
             if not self._ensure_connected():
                 return None
 
-            session_key = f"agent:{self.agent_id}:{self.namespace}"
+            session_key = self._session_key()
             idempotency_key = str(uuid.uuid4())
 
             resp = self._rpc(
