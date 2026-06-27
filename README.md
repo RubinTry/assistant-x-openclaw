@@ -179,16 +179,26 @@ openclaw agents add lin-meimei
 │                    main.py                           │
 │                                                      │
 │  ┌────────────┐    ┌──────────┐    ┌─────────────┐  │
-│  │ KWS 唤醒   │ →  │ ASR 识别  │ →  │ OpenClaw    │  │
-│  │ (多角色)    │    │ 流式/离线 │    │ Gateway     │  │
+│  │ KWS 唤醒   │ →  │ ASR 识别  │ →  │ 主脑桥接     │  │
+│  │ (多角色)    │    │ 流式/离线 │    │ engine 切换 │  │
 │  └────────────┘    └──────────┘    └──────┬──────┘  │
 │                                            │         │
 │  ┌─────────────────┐    ┌────────────────▼──────┐  │
 │  │ 反馈系统         │ ←  │ TTS (Piper/ZipVoice/   │  │
 │  │ 音效+HUD+通知    │    │      VITS MeloTTS)     │  │
 │  └─────────────────┘    └───────────────────────┘  │
-└─────────────────────────────────────────────────────┘
+└──────────────────────────┬──────────────────────────┘
+                          │ LLM 推理（engine 二选一）
+            ┌──────────────┴───────────────┐
+            ▼                               ▼
+┌───────────────────────┐    ┌──────────────────────────┐
+│ OpenClaw Gateway      │    │ Hermes 本地网关           │
+│ engine=openclaw（默认）│    │ engine=hermes            │
+│ openclaw_bridge_ws    │    │ 一角色一 profile / 网关   │
+└───────────────────────┘    └──────────────────────────┘
 ```
+
+> 主脑引擎由 `assistants.json` 顶层 `engine` 字段切换：缺省/未知值走 **OpenClaw**（默认），填 `hermes` 则走本地 Hermes。Hermes 链路详见 [hermes-assistant.md](./hermes-assistant.md)。
 
 ## 快速开始
 
@@ -651,6 +661,19 @@ curl -X POST http://127.0.0.1:18790/dnd/disable  # 解除勿扰：恢复唤醒
 
 > 端口被占导致接口未监听时勿扰不会生效（控制中心会在录入日志里给出警告）。
 > 主程序启动绑定该端口已带重试，`start.sh` 也会预清理 18790。
+
+**摄像头抓帧（供 Hermes「用摄像头看看我」）：**
+
+`GET /camera/snapshot` 抓一帧并直接返回 JPEG，主脑（Hermes/OpenClaw）可经此拿到画面再交给 `vision_analyze`：
+
+```bash
+curl -s http://127.0.0.1:18790/camera/snapshot -o /tmp/cam.jpg   # 成功：JPEG 落地
+# 失败返回 JSON：{"error": "..."}（摄像头不可用 503 / 抓帧失败 500）
+```
+
+- 抓帧复用仓库自带的 **imageio-ffmpeg**（静态 ffmpeg 含 avfoundation），免装系统工具；实现见 [src/camera.py](src/camera.py)，默认 1920x1080@30、丢弃前 8 帧预热、8s 超时软失败。
+- **首次需授权**：抓帧进程由控制中心拉起，摄像头权限归控制中心。已在其 `Info.plist` 加 `NSCameraUsageDescription`——**改的是源码，需重新 `flutter build macos` 覆盖安装 `/Applications/control_center.app` 才进包**；之后首次调用会弹「控制中心想使用摄像头」，点允许即永久生效（与 Dock 自动隐藏的授权同理）。
+- 仅 macOS；非 macOS 或未授权超时均返回错误、不影响其他功能。
 
 ## 常见问题
 

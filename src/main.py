@@ -68,6 +68,39 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_GET(self):
+        # 摄像头抓帧：抓一帧 JPEG 直接回给调用方（Hermes 用 curl -o 落地后交 vision_analyze）
+        if self.path.startswith("/camera/snapshot"):
+            import tempfile
+            from camera import get_camera_controller
+
+            cam = get_camera_controller()
+            if not cam.is_available():
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "camera unavailable"}).encode())
+                return
+            out = os.path.join(tempfile.gettempdir(), "jarvis_cam_snapshot.jpg")
+            path = cam.capture(out)
+            if path and os.path.exists(path) and os.path.getsize(path) > 0:
+                data = open(path, "rb").read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(
+                    {"error": "capture failed (摄像头未授权？首次需在控制中心授权)"}
+                ).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def log_message(self, format, *args):
         pass
 

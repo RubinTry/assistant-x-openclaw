@@ -130,4 +130,22 @@ voice-assistant-wake-up-<本地时间戳>
   `~/.hermes/profiles/<profile>/voice_gateway.log` 里网关自身的报错。
 - **唤醒后问候很怪 / 把 `voice-assistant-wake-up-...` 念出来**：角色 prompt 没加唤醒消息应答规则，见第四节。
 - **多个角色记忆串了**：确认每个角色用的是**各自独立**的 profile 目录（`agent_id` 不同）。
+- **对话突然不回复 / 日志刷 `HTTP 429 用量上限`**：主脑后端（如 MiniMax）配额耗尽，hermes 调 LLM 被拒、重试 3 次仍失败 → 语音助手收不到回复。先确认/恢复后端配额。**根因常是上下文滚太大**：单轮请求可膨胀到十几万 token，既烧配额又拖慢（压缩还会因客户端超时而压不动，陷入卡死循环）。两个桥（`src/hermes_bridge.py` / `src/openclaw_bridge_websocket.py`）的 `session_id` 已改为**按小时滚动**（`voice-<agent>-<YYYYMMDDHH>` / `agent:<id>:<ns>:<YYYYMMDDHH>`）：每过一小时自动新会话，老会话留在 `state.db`（可被 `session_search` 召回，不丢），从根上防止单会话无限膨胀。若仍遇卡死，多半是某个**老会话**积压过大，排查：
+  ```bash
+  # 看 hermes 网关最近的 429 与单轮规模
+  grep -E "429|msgs=.*tokens=" ~/.hermes/profiles/<profile>/logs/gateway.error.log | tail
+  # 看某会话累积的消息数（历史在 SQLite，不在 json 文件）
+  sqlite3 ~/.hermes/profiles/<profile>/state.db \
+    "select session_id,count(*) from messages group by session_id order by 2 desc limit 5;"
+  ```
+- **给上下文封顶（防 429、防膨胀）**：hermes **自带上下文压缩**（摘要而非删除），在 `~/.hermes/profiles/<profile>/config.yaml`：
+  ```yaml
+  compression:
+    enabled: true
+    threshold: 0.05      # 触发线 = 模型上下文窗口的占比。默认 0.5（窗口 1M 时 ≈50 万 token 才压，
+                         # 远超一般套餐配额）→ 调小到 0.05（≈5 万 token）即自动摘要封顶
+    target_ratio: 0.2    # 触发后压到 20%
+    protect_last_n: 20   # 最近 N 轮原样保留
+  ```
+  **改后需重启网关生效**；首次压缩本身也要调一次 LLM（配额耗尽时连压缩都会卡，需先恢复配额）。**内容不丢**：压缩是摘要，原始消息仍在 `state.db`（带全文索引可检索）+ 记忆系统（`memory.memory_enabled`）沉淀，三重保底。
 - **想切回 OpenClaw**：把 `engine` 改回 `openclaw`（或删掉该字段）重启即可。
