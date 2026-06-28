@@ -1453,10 +1453,10 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     return [used.clamp(0, total).toInt(), total];
   }
 
-  /// macOS 原生存储 [已用, 总量] 字节，经 df -k 根卷。
-  /// 直接读 Used（f[2]），不用 total−avail（APFS 上 avail 偏小）。
+  /// macOS 原生存储 [已用, 总量] 字节，经 df -k Data 卷。
+  /// 不用 /（APFS 上 / 是只读系统快照，数据在 /System/Volumes/Data）。
   Future<List<int>?> _macStorage() async {
-    final r = await Process.run('df', ['-k', '/']);
+    final r = await Process.run('df', ['-k', '/System/Volumes/Data']);
     final lines = r.stdout.toString().trim().split('\n');
     if (lines.length < 2) return null;
     final f = lines.last.trim().split(RegExp(r'\s+'));
