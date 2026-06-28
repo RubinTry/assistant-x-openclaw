@@ -1267,12 +1267,14 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
   // 避免每次轮询 setState 整个面板重建。
   final ValueNotifier<_Metric> _memN = ValueNotifier(const _Metric(0, []));
   final ValueNotifier<_Metric> _storN = ValueNotifier(const _Metric(0, []));
+  final ValueNotifier<_Metric> _cpufN = ValueNotifier(const _Metric(0, []));
   final ValueNotifier<_Metric> _batN = ValueNotifier(const _Metric(0, []));
   final ValueNotifier<_Net> _netN =
       ValueNotifier(const _Net(Icons.help_outline, '—', ''));
 
   final List<double> _memHist = [];
   final List<double> _storHist = [];
+  final List<double> _cpufHist = [];
   final List<double> _batHist = [];
 
   // 网络速率：记录上次累计字节 + 时间，差分算 KB/s
@@ -1292,6 +1294,7 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     _timer?.cancel();
     _memN.dispose();
     _storN.dispose();
+    _cpufN.dispose();
     _batN.dispose();
     _netN.dispose();
     super.dispose();
@@ -1305,16 +1308,14 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
   Future<void> _poll() async {
     double mem = _memN.value.pct, stor = _storN.value.pct;
     String memDetail = _memN.value.detail, storDetail = _storN.value.detail;
-    // macOS：system_info2 4.1.0 的实现有 bug——getTotalPhysicalMemory 把已是字节的
-    // hw.memsize 又乘了一遍 hw.pagesize（24G 会显示成 39 万 G），存储接口在 macOS
-    // 直接 notSupportedError。故 macOS 走原生 sysctl/vm_stat/df 自算，其余平台仍用
-    // system_info2。
+    // macOS：system_info2 内存/存储有 bug（总内存多乘 pagesize、存储抛异常），
+    // 故 macOS 走原生 sysctl/vm_stat/df 自算，其余平台仍用 system_info2。
     try {
       final m = Platform.isMacOS ? await _macMem() : _sysInfoMem();
       if (m != null) {
         final used = m[0], total = m[1];
         mem = (used / total * 100).clamp(0, 100).toDouble();
-        memDetail = '${_fmtGB(used)} / ${_fmtGB(total)} GB';
+        memDetail = '${_fmtGiB(used)} / ${_fmtGiB(total)} GiB';
       }
     } catch (_) {}
     try {
@@ -1323,6 +1324,19 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
         final used = s[0], total = s[1];
         stor = (used / total * 100).clamp(0, 100).toDouble();
         storDetail = '${_fmtGB(used)} / ${_fmtGB(total)} GB';
+      }
+    } catch (_) {}
+
+    // CPU 使用率：macOS 用 top 取 user+sys，其余平台暂不采集
+    double cpuf = _cpufN.value.pct;
+    String cpuDetail = _cpufN.value.detail;
+    try {
+      if (Platform.isMacOS) {
+        final cpu = await _macCpu();
+        if (cpu != null) {
+          cpuf = cpu[0].toDouble();
+          cpuDetail = '${cpu[1]} cores';
+        }
       }
     } catch (_) {}
 
@@ -1366,11 +1380,14 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     if (!mounted) return;
     _push(_memHist, mem);
     _push(_storHist, stor);
+    _push(_cpufHist, cpuf);
     _push(_batHist, bat.toDouble());
     _memN.value =
         _Metric(mem, List<double>.from(_memHist), detail: memDetail);
     _storN.value =
         _Metric(stor, List<double>.from(_storHist), detail: storDetail);
+    _cpufN.value =
+        _Metric(cpuf, List<double>.from(_cpufHist), detail: cpuDetail);
     _batN.value = _Metric(
       bat.toDouble(),
       List<double>.from(_batHist),
@@ -1408,10 +1425,8 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     return [total - free, total];
   }
 
-  /// macOS 原生内存 [已用, 总量] 字节。总量取 hw.memsize（已是字节）。已用严格按
-  /// 活动监视器“已使用内存”口径 = App Memory + Wired + Compressed，其中
-  /// App Memory = 匿名页(Anonymous，即非文件缓存) − 可清除页(Purgeable)。
-  /// 旧版用 active 会把文件缓存的活跃页也算进去，偏小且与活动监视器对不上。
+  /// macOS 原生内存 [已用, 总量] 字节。总量取 hw.memsize。已用严格按
+  /// 活动监视器“已使用内存”口径 = App Memory + Wired + Compressed。
   Future<List<int>?> _macMem() async {
     final total =
         int.tryParse((await Process.run('sysctl', ['-n', 'hw.memsize'])).stdout
@@ -1429,17 +1444,17 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
       final m = RegExp('$key:\\s+(\\d+)').firstMatch(out);
       return m != null ? int.parse(m.group(1)!) : 0;
     }
-
     final anonymous = pages('Anonymous pages');
     final purgeable = pages('Pages purgeable');
     final wired = pages('Pages wired down');
     final compressed = pages('Pages occupied by compressor');
-    final appMem = anonymous - purgeable; // App Memory
+    final appMem = anonymous - purgeable;
     final used = (appMem + wired + compressed) * pageSize;
     return [used.clamp(0, total).toInt(), total];
   }
 
-  /// macOS 原生存储 [已用, 总量] 字节，经 df -k 根卷；失败返回 null。
+  /// macOS 原生存储 [已用, 总量] 字节，经 df -k 根卷。
+  /// 直接读 Used（f[2]），不用 total−avail（APFS 上 avail 偏小）。
   Future<List<int>?> _macStorage() async {
     final r = await Process.run('df', ['-k', '/']);
     final lines = r.stdout.toString().trim().split('\n');
@@ -1447,9 +1462,32 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     final f = lines.last.trim().split(RegExp(r'\s+'));
     if (f.length < 4) return null;
     final total = (int.tryParse(f[1]) ?? 0) * 1024;
-    final avail = (int.tryParse(f[3]) ?? 0) * 1024;
+    final used = (int.tryParse(f[2]) ?? 0) * 1024;
     if (total <= 0) return null;
-    return [total - avail, total];
+    return [used, total];
+  }
+
+  /// macOS CPU 使用率 [pct, coreCount]。用 top 取 user+sys 百分比；
+  /// coreCount 从 system_info2 取（唯一 macOS 上可用的 API）。
+  Future<List<int>?> _macCpu() async {
+    try {
+      final top = await Process.run(
+        'top', ['-l', '1', '-n', '0', '-stats', 'cpu'],
+      );
+      // top 输出格式：CPU usage: 45.55% user, 15.46% sys, 38.98% idle
+      final m = RegExp(
+        r'CPU usage:\s+([\d.]+)%\s+user,\s+([\d.]+)%\s+sys',
+      ).firstMatch(top.stdout.toString());
+      if (m == null) return null;
+      final user = double.tryParse(m.group(1)!) ?? 0;
+      final sys = double.tryParse(m.group(2)!) ?? 0;
+      final pct = (user + sys).clamp(0, 100).round();
+
+      final cores = SysInfo.cores.length;
+      return [pct, cores];
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 读主网卡累计收发字节 [in, out]（仅 macOS，经 netstat）；失败返回 null。
@@ -1470,7 +1508,12 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     return null;
   }
 
+  /// 字节 → 十进制 GB（存储，与 Finder 对齐）。
   static String _fmtGB(num bytes) =>
+      (bytes / 1000000000).toStringAsFixed(1);
+
+  /// 字节 → 二进制 GiB（内存，与活动监视器对齐）。
+  static String _fmtGiB(num bytes) =>
       (bytes / 1073741824).toStringAsFixed(1);
 
   static String _fmtRate(double kbs) {
@@ -1619,6 +1662,13 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
             ValueListenableBuilder<_Metric>(
               valueListenable: _storN,
               builder: (_, m, __) => _gaugeRow('STORAGE', m),
+            ),
+            SizedBox(
+              height: space,
+            ),
+            ValueListenableBuilder<_Metric>(
+              valueListenable: _cpufN,
+              builder: (_, m, __) => _gaugeRow('CPU', m),
             ),
             SizedBox(
               height: space,
