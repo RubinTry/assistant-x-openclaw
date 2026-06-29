@@ -2,7 +2,7 @@
 
 > ![妈妈我再也不用羡慕钢铁侠了](./docs/jarvis.png)
 
-<h3 align="center"><a href="./hermes-assistant.md">Hermes 版本请看这 →</a></h3>
+<h3 align="center"><a href="./hermes-assistant.md" target="_blank"  rel="noopener noreferrer">Hermes 版本请看这 →</a></h3>
 
 妈妈我再也不用羡慕钢铁侠了😭
 
@@ -282,6 +282,7 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 | # | 模型 | 下载链接 |
 |---|------|----------|
 | 1 | KWS 唤醒模型 | [sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2) |
+| 1 | KWS 唤醒模型(跟上面的二选一) | [sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2) |
 | 2 | ASR 语音识别模型 | [sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2) |
 | 3 | VAD 静音检测模型 | [silero_vad_v5.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx)（下载后重命名为 `silero_vad.onnx`） |
 | 4 | SenseVoice 多语言识别模型 | [sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2) |

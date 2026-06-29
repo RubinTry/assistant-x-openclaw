@@ -21,12 +21,21 @@ _PROJECT_DIR = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
+# MeloTTS 模型固有输出振幅极低（peak≈0.13, -18 dBFS），合成后做
+# peak 归一化，让 WAV 文件本身响度足够；Mac 上 afplay -v 上限
+# 是 1.0，无法靠播放端增益补偿，所以必须在写文件前放大。
+_TARGET_PEAK = 0.9
+# synthesize_to_array 的输出会被 main.py 的 play_array(volume=1.5) 再放大
+# 一次，若归一化到 0.9 再乘 1.5 会 clip 削顶，故此路径单独用更低的
+# 目标峰值，预留 1.5× 增益空间（0.6×1.5=0.9，不 clip）。
+_TARGET_PEAK_ARRAY = 0.6
+
 
 class CustomTTS(AssistantTTS):
     def __init__(self, config: dict):
         self.config = config
         self._engine = config.get("engine", "vits")
-        self._speed = config.get("speed", 0.85)
+        self._speed = config.get("speed", 1.0)
         model_dir = config.get("model_dir", "models/vits-melo-tts-zh_en")
         self._model_dir = os.path.join(_PROJECT_DIR, model_dir)
         self._tts = None
@@ -105,6 +114,18 @@ class CustomTTS(AssistantTTS):
                 return None
 
             trimmed_audio, sample_rate = result
+
+            # peak 归一化：MeloTTS 默认输出 peak≈0.13 太轻，
+            # 放大到 _TARGET_PEAK 让 WAV 响度足够。
+            peak = float(np.max(np.abs(trimmed_audio))) if len(trimmed_audio) else 0.0
+            if peak > 1e-6:
+                gain = _TARGET_PEAK / peak
+                trimmed_audio = (trimmed_audio * gain).astype(np.float32)
+                logger.debug(
+                    f"CustomTTS 归一化: peak={peak:.4f} → gain={gain:.2f} → "
+                    f"new_peak={float(np.max(np.abs(trimmed_audio))):.4f}"
+                )
+
             actual_duration = len(trimmed_audio) / sample_rate
             sf.write(
                 output_path, trimmed_audio, samplerate=sample_rate, subtype="PCM_16"
@@ -132,7 +153,20 @@ class CustomTTS(AssistantTTS):
             if result is None:
                 logger.error("CustomTTS 预合成失败")
                 return None
-            return result
+            audio_arr, sr = result
+
+            # peak 归一化（同 synthesize 路径，但目标峰值更低，给
+            # play_array(volume=1.5) 预留增益空间避免 clip）
+            peak = float(np.max(np.abs(audio_arr))) if len(audio_arr) else 0.0
+            if peak > 1e-6:
+                gain = _TARGET_PEAK_ARRAY / peak
+                audio_arr = (audio_arr * gain).astype(np.float32)
+                logger.debug(
+                    f"CustomTTS 归一化(array): peak={peak:.4f} → gain={gain:.2f} → "
+                    f"new_peak={float(np.max(np.abs(audio_arr))):.4f}"
+                )
+
+            return (audio_arr, sr)
 
         except Exception as e:
             logger.error(f"CustomTTS 预合成异常: {e}")

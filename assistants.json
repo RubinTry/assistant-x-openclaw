@@ -17,7 +17,7 @@
                 "tts": "jarvis"
             },
             "keywords_file": "keywords/jarvis.txt",
-            "asr_mode": "sense_voice_en",
+            "asr_mode": "offline",
             "tts_config": {
                 "metallic": {
                     "enabled": true,

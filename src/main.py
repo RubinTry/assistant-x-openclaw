@@ -2367,26 +2367,26 @@ def get_args():
         description="语音助手 - 基于 sherpa-onnx 的语音唤醒 + 识别",
     )
 
-    # 关键词检测模型参数
+    # 关键词检测模型参数（sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20，中英双语）
     parser.add_argument(
         "--kws-tokens",
         type=str,
-        default="models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/tokens.txt",
+        default="models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt",
     )
     parser.add_argument(
         "--kws-encoder",
         type=str,
-        default="models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/encoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+        default="models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx",
     )
     parser.add_argument(
         "--kws-decoder",
         type=str,
-        default="models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+        default="models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
     )
     parser.add_argument(
         "--kws-joiner",
         type=str,
-        default="models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/joiner-epoch-12-avg-2-chunk-16-left-64.onnx",
+        default="models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx",
     )
     parser.add_argument("--keywords-file", type=str, default="keywords/lin-meimei.txt")
     parser.add_argument("--keywords-score", type=float, default=0.15)

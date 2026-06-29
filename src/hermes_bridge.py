@@ -186,7 +186,8 @@ class HermesBridge:
                 print(f"[Hermes] ✗ API Server 响应异常: HTTP {resp.status_code}")
                 logger.warning("API Server 响应异常: HTTP %s", resp.status_code)
                 return
-            print(f"[Hermes] ✓ 角色={self.agent_id} 端点={self.gateway_url} 连通")
+            _k = self.key or ""
+            print(f"[Hermes] ✓ 角色={self.agent_id} 端点={self.gateway_url} 连通 (key={_k[:6]}…len={len(_k)})")
             logger.info("✓ Hermes API Server 连通正常 (%s)", self.gateway_url)
         except Exception as e:
             print(f"[Hermes] ✗ API Server 不可达: {e}")
@@ -252,6 +253,7 @@ class HermesBridge:
 
             if resp.status_code != 200:
                 logger.error("HTTP %s: %s", resp.status_code, resp.text[:300])
+                print(f"[Hermes] ✗ chat/completions HTTP {resp.status_code}: {resp.text[:160]}")
                 with self._lock:
                     if self._current_request_id == request_id:
                         self._current_request_id = None
