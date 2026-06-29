@@ -91,7 +91,7 @@ def create_recognizer():
         decoding_method="greedy_search",
         provider=args.provider,
         # 开启端点检测：增量喂入时用静音停顿来切句，
-        # 每念一次「贾维斯」之间的停顿即触发一次端点，吐出该次结果。
+        # 每念一次「Is JARVIS here」之间的停顿即触发一次端点，吐出该次结果。
         enable_endpoint_detection=True,
         rule1_min_trailing_silence=2.4,
         rule2_min_trailing_silence=0.8,
@@ -104,7 +104,7 @@ def enroll_speaker():
     log("\n" + "=" * 50)
     log("声纹录入模式")
     log("=" * 50)
-    log("请在 20 秒内重复朗读「贾维斯」")
+    log("请在 20 秒内重复朗读「Is JARVIS here」")
     log("每次朗读都会识别成文字显示")
     log("=" * 50)
 
@@ -140,14 +140,14 @@ def enroll_speaker():
         duration = 20
 
         log("\n" + "=" * 50)
-        log("请在 20 秒内重复朗读「贾维斯」")
+        log("请在 20 秒内重复朗读「Is JARVIS here」")
         log("=" * 50)
 
         for i in range(3, 0, -1):
             log(f"准备录音: {i}...")
             time.sleep(1)
 
-        log("开始录音，请重复朗读「贾维斯」！")
+        log("开始录音，请重复朗读「Is JARVIS here」！")
         log(f"录音时长: {duration} 秒")
 
         recording = sd.rec(
@@ -172,7 +172,7 @@ def enroll_speaker():
                 stream.accept_waveform(sample_rate, chunk)
                 while recognizer.is_ready(stream):
                     recognizer.decode_stream(stream)
-                # 一次停顿（端点）= 一次完整的「贾维斯」，吐出并重置
+                # 一次停顿（端点）= 一次完整的「Is JARVIS here」，吐出并重置
                 if recognizer.is_endpoint(stream):
                     text = recognizer.get_result(stream)
                     if text:
