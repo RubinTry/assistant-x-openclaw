@@ -41,7 +41,7 @@ echo Cleaning up existing processes...
 taskkill /F /IM python.exe 2>nul
 taskkill /F /IM pythonw.exe 2>nul
 taskkill /F /IM assistant_overlay.exe 2>nul
-timeout /t 1 >nul
+ping -n 2 127.0.0.1 >nul
 
 echo Cleaning up ports 17888 and 17889...
 for %%p in (17888 17889) do (
@@ -50,11 +50,11 @@ for %%p in (17888 17889) do (
         taskkill /F /PID %%a >nul 2>&1
     )
 )
-timeout /t 1 >nul
+ping -n 2 127.0.0.1 >nul
 
 echo Starting JARVIS Overlay...
-powershell -ExecutionPolicy Bypass -File "%PROJECT_DIR%\scripts\launch_overlay.ps1"
-timeout /t 2 >nul
+powershell -ExecutionPolicy Bypass -NoProfile -File "%PROJECT_DIR%\scripts\launch_overlay.ps1" < nul
+ping -n 3 127.0.0.1 >nul
 
 echo Starting voice assistant...
 cd /d "%PROJECT_DIR%"

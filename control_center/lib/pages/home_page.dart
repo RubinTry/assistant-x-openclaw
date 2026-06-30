@@ -59,6 +59,12 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _initNotifications() async {
+    // flutter_local_notifications 仅支持 macOS/Linux，Windows 上调用会抛
+    // LateInitializationError（platform instance 是 late 字段，无 Windows 实现）。
+    if (!Platform.isMacOS && !Platform.isLinux) {
+      debugPrint('通知初始化: 当前平台不支持系统通知，已跳过');
+      return;
+    }
     try {
       const darwin = DarwinInitializationSettings(
         requestAlertPermission: true,
