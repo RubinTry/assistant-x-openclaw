@@ -39,6 +39,43 @@ openclaw agents add lin-meimei
 # 智能体相关配置文档： https://docs.openclaw.ai/zh-CN/concepts/multi-agent
 ```
 
+### 设备配对（首次启动必看）
+
+语音助手通过 WebSocket 以「设备」身份连接 OpenClaw Gateway，需要 **operator.read / operator.write / operator.admin** 三个 scope。首次启动时助手会自动生成 Ed25519 密钥对（`~/.openclaw/devices/voice_assistant_keypair.json`）并向 Gateway 发起配对申请，申请进入 `pending.json` **待你手动审批**——不审批的话，每次唤醒都会报：
+
+```
+[ERROR] openclaw_bridge_websocket: WebSocket connect 失败: pairing required: device is not approved yet
+[ERROR] websocket: close status: 1008
+```
+
+**配对步骤（一次性）：**
+
+1. **先启动一次语音助手**（`scripts\start.bat` 或 `./scripts/start.sh`），让它发起配对申请。此时唤醒会失败是正常的，目的是把设备身份写到 pending 列表。
+
+2. **查看待审批的配对请求**：
+
+```shell
+openclaw devices pending
+```
+
+3. **审批设备**（`<requestId>` 是上一步列出的请求 ID）：
+
+```shell
+openclaw devices approve <requestId>
+```
+
+> 审批时如果提示 `scope upgrade pending approval`，这是 CLI 自身设备权限不足导致的提示——**不影响审批结果**，设备仍会被写入 `paired.json` 并获得所需 scope。CLI 走的是 local fallback 路径。
+
+4. **验证配对成功**：
+
+```shell
+openclaw devices list
+```
+
+设备应出现在已配对列表中，`approvedScopes` 包含 `operator.read`、`operator.write`、`operator.admin`。之后重启语音助手，唤醒即可正常握手。
+
+> **原理**：助手每次连接会向 Gateway 发送 `connect` 请求，携带设备签名（v3 payload，Ed25519 签名），Gateway 校验签名 + scopes。设备必须在 `~/.openclaw/devices/paired.json` 中已配对，且 `approvedScopes` 覆盖连接时声明的 scopes，否则触发 `pairing-required` 分支。详见 [openclaw_bridge_websocket.py](src/openclaw_bridge_websocket.py) 头部注释。
+
 > 💡 **强烈建议**：为每个智能体设置对应的 System Prompt，确保角色性格和讲话风格正确。在 OpenClaw Web UI 中创建智能体后，将下方 Prompt 粘贴到 System Prompt 配置中。
 
 ### [贾维斯（Jarvis）System Prompt](./prompts/jarvis/SOUL.md)
@@ -150,6 +187,7 @@ openclaw agents add lin-meimei
   - [4. 下载模型文件](#4-下载模型文件)
   - [5. 准备音效文件](#5-准备音效文件)
   - [6. 启动语音助手](#6-启动语音助手)
+  - [7. 设备配对（首次启动必看）](#设备配对首次启动必看)
 - [使用教程](#使用教程)
   - [基本使用流程](#基本使用流程)
   - [多角色切换](#多角色切换)
@@ -332,15 +370,29 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 
 **Windows：**
 
-```cmd
-scripts\start.bat
-```
+1.请从[此处](https://modelscope.cn/datasets/rubintry/jarvis/files)下载 `assistant_overlay.msix`、`control_center.msix`
 
-启动脚本会自动：
-1. 合并所有唤醒词文件到 `global.txt`
-2. 清理端口占用
-3. 启动 Flutter HUD 视觉特效窗口
-4. 启动语音助手主程序
+2.双击 `assistant_overlay.msix` 安装，首次安装会弹窗提示安装自签名测试证书，点击确认（需管理员权限，会弹 UAC）。`control_center.msix` 同理
+
+> 若双击安装报错，也可用 PowerShell 安装（以管理员身份运行）：
+> ```powershell
+> Add-AppxPackage -Path assistant_overlay.msix
+> Add-AppxPackage -Path control_center.msix
+> ```
+
+3.从开始菜单打开「Control-Center」，根据提示录入声纹后，开启语音助手，喊出贾维斯
+
+
+4.（从源码打包）如需自行打包 MSIX 安装包，在各 Flutter 项目目录下执行：
+```cmd
+cd assistant_overlay
+scripts\package.bat
+
+cd control_center
+scripts\package.bat
+```
+打包脚本会自动执行 `flutter build windows` + `dart run msix:create`，生成的 `.msix` 在 `build\windows\x64
+unner\Release\` 目录下。
 
 
 ## 使用教程
