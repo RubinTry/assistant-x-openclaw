@@ -142,6 +142,11 @@ except ImportError:
     print("请先安装 sherpa-onnx：pip install sherpa-onnx")
     sys.exit(1)
 
+try:
+    import soxr as _soxr
+except ImportError:
+    _soxr = None  # 无 soxr 时退回原始采样率，ASR 精度会下降
+
 from tts import (
     text_to_speech_play,
     is_tts_playing,
@@ -547,7 +552,10 @@ class VoiceAssistant:
         self.current_cfg = default_cfg
         self._switch_assistant(default_cfg["id"])
 
-        self.sample_rate = 16000
+        self.sample_rate = 48000
+        # sherpa-onnx 模型训练采样率为 16kHz，accept_waveform 必须喂 16kHz 数据；
+        # 输入流保持 48kHz 兼容其他应用，在处理循环里用 soxr 重采样到 16kHz 再喂模型。
+        self._asr_rate = 16000
         # 激活生命周期联动：is_awake 是 property（见下），在 False↔True
         # 边沿自动派发钩子。先建注册表并接入已有联动（暂停媒体），
         # 再触发首次赋值——此时 manager 已就绪。
@@ -565,18 +573,18 @@ class VoiceAssistant:
         self.idle_timeout = 30
         self.last_activity_time = time.time()
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
-        self._wake_buffer_max_samples = int(self.sample_rate * 3)  # 最多存3秒
+        self._wake_buffer_max_samples = int(self._asr_rate * 3)  # 最多存3秒（16kHz）
         self._prev_dnd_mode = False  # 上一轮勿扰状态，用于检测 DND 解除瞬间清流
 
         # VAD 前置缓存（用于待机时轻量级语音检测）
         self._vad_buffer = []
         self._vad_buffer_max_seconds = 2
-        self._vad_buffer_max_samples = int(self.sample_rate * self._vad_buffer_max_seconds)
+        self._vad_buffer_max_samples = int(self._asr_rate * self._vad_buffer_max_seconds)
 
         # 连续对话模式音频缓冲（用于声纹验证）
         self._conv_audio_buffer = []
         self._conv_buffer_max_seconds = 3
-        self._conv_buffer_max_samples = int(self.sample_rate * self._conv_buffer_max_seconds)
+        self._conv_buffer_max_samples = int(self._asr_rate * self._conv_buffer_max_seconds)
         self._speaker_verified = False  # 标记唤醒者是否已通过声纹验证
         self._speaker_embeddings = {}  # name -> embedding array，用于渐进更新
         self._verified_speaker_name = None  # 当前验证通过的说话人
@@ -929,7 +937,7 @@ class VoiceAssistant:
             self._speaker_extractor,
             self._speaker_manager,
             audio_samples,
-            self.sample_rate
+            self._asr_rate
         )
 
         if is_verified:
@@ -1143,7 +1151,7 @@ class VoiceAssistant:
             decoder=self.args.asr_decoder,
             joiner=self.args.asr_joiner,
             num_threads=1,
-            sample_rate=self.sample_rate,
+            sample_rate=self._asr_rate,
             feature_dim=80,
             decoding_method="modified_beam_search" if use_hotwords else "greedy_search",
             hotwords_file=hotwords_file if use_hotwords else "",
@@ -1356,6 +1364,18 @@ class VoiceAssistant:
                         keywords.append(keyword)
         return keywords
 
+    def _resample_for_asr(self, samples):
+        """将输入流采样率的音频重采样到 ASR 模型期望的 16kHz。
+        输入流保持 48kHz 兼容其他应用，sherpa-onnx 模型训练时为 16kHz，
+        必须重采样才能正确提取 fbank 特征。"""
+        if self.sample_rate == self._asr_rate:
+            return samples
+        if _soxr is not None:
+            return _soxr.resample(samples, self.sample_rate, self._asr_rate).astype(np.float32)
+        # 无 soxr 时退回：简单每 N 取 1（粗略降采样，精度差但不会像错采样率那样完全乱套）
+        ratio = self.sample_rate // self._asr_rate
+        return samples[::ratio]
+
     def _audio_callback(self, indata, frames, time_info, status):
         """音频回调函数"""
         if status:
@@ -1506,7 +1526,8 @@ class VoiceAssistant:
 
                     self.last_activity_time = time.time()
                     samples = audio_data.reshape(-1)
-                    keyword_stream.accept_waveform(self.sample_rate, samples)
+                    asr_samples = self._resample_for_asr(samples)
+                    keyword_stream.accept_waveform(self._asr_rate, asr_samples)
 
                     while self.keyword_spotter.is_ready(keyword_stream):
                         self.keyword_spotter.decode_stream(keyword_stream)
@@ -1570,18 +1591,19 @@ class VoiceAssistant:
                     continue
 
                 samples = audio_data.reshape(-1)
+                asr_samples = self._resample_for_asr(samples)
                 self.last_activity_time = time.time()
 
                 if not self.is_awake:
-                    # 持续缓冲音频用于声纹验证
-                    self._wake_audio_buffer.append(samples.tolist())
+                    # 持续缓冲音频用于声纹验证（16kHz，与模型匹配）
+                    self._wake_audio_buffer.append(asr_samples.tolist())
                     total_len = sum(len(b) for b in self._wake_audio_buffer)
                     while total_len > self._wake_buffer_max_samples:
                         removed = self._wake_audio_buffer.pop(0)
                         total_len -= len(removed)
 
-                    # 维护 VAD 前后缓存（最近 2 秒）
-                    self._vad_buffer.append(samples.tolist())
+                    # 维护 VAD 前后缓存（最近 2 秒，16kHz）
+                    self._vad_buffer.append(asr_samples.tolist())
                     vad_total = sum(len(b) for b in self._vad_buffer)
                     while vad_total > self._vad_buffer_max_samples:
                         self._vad_buffer.pop(0)
@@ -1590,7 +1612,7 @@ class VoiceAssistant:
                     # VAD 检测：有语音时才继续处理，抑制非人声（如电脑播放的人声/TTS）
                     vad_has_speech = False
                     if vad_stream is not None:
-                        vad_stream.accept_waveform(samples)
+                        vad_stream.accept_waveform(asr_samples)
                         if vad_stream.is_speech_detected():
                             vad_has_speech = True
 
@@ -1601,7 +1623,7 @@ class VoiceAssistant:
                     self._prev_dnd_mode = _dnd_mode
 
                     # KWS 实时检测
-                    keyword_stream.accept_waveform(self.sample_rate, samples)
+                    keyword_stream.accept_waveform(self._asr_rate, asr_samples)
 
                     while self.keyword_spotter.is_ready(keyword_stream):
                         self.keyword_spotter.decode_stream(keyword_stream)
@@ -1642,7 +1664,7 @@ class VoiceAssistant:
                                 if len(wake_samples) > self._wake_buffer_max_samples:
                                     wake_samples = wake_samples[-self._wake_buffer_max_samples:]
                                 print(f"[声纹] 唤醒词检测成功，准备验证声纹 (样本长度: {len(wake_samples)})")
-                                is_verified = self._verify_speaker_on_wake(wake_samples, self.sample_rate)
+                                is_verified = self._verify_speaker_on_wake(wake_samples, self._asr_rate)
                                 if not is_verified:
                                     print("[声纹] 唤醒被拒绝: 未通过声纹验证")
                                     # 异步发送通知，避免 2 秒 connect 超时阻塞主循环
@@ -1729,14 +1751,14 @@ class VoiceAssistant:
                     if recognition_stream is None:
                         recognition_stream = self.recognizer.create_stream()
 
-                    # 持续缓冲音频用于声纹渐进更新
-                    self._conv_audio_buffer.append(samples.tolist())
+                    # 持续缓冲音频用于声纹渐进更新（16kHz，与模型匹配）
+                    self._conv_audio_buffer.append(asr_samples.tolist())
                     conv_total = sum(len(b) for b in self._conv_audio_buffer)
                     while conv_total > self._conv_buffer_max_samples:
                         removed = self._conv_audio_buffer.pop(0)
                         conv_total -= len(removed)
 
-                    recognition_stream.accept_waveform(self.sample_rate, samples)
+                    recognition_stream.accept_waveform(self._asr_rate, asr_samples)
 
                     while self.recognizer.is_ready(recognition_stream):
                         self.recognizer.decode_stream(recognition_stream)
