@@ -236,7 +236,7 @@
             "tts_config": {
                 "engine": "vits",
                 "model_dir": "models/vits-melo-tts-zh_en",
-                "speed": 0.85
+                "speed": 1.0
             },
             "visual_config": {
                 "agent_id": "lin-meimei"
@@ -293,8 +293,6 @@
             "exit_keywords": [
                 "退下",
                 "退下吧",
-                "没事了",
-                "没有了",
                 "结束",
                 "行了",
                 "好了",

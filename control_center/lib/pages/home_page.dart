@@ -33,6 +33,8 @@ class HomePageState extends State<HomePage> {
       FlutterLocalNotificationsPlugin();
   bool _notificationsReady = false;
 
+  bool _alreadyShow = false;
+
   @override
   void initState() {
     super.initState();
@@ -163,7 +165,7 @@ class HomePageState extends State<HomePage> {
   }
 
   void _showSpeakerRejectedDialog() {
-    if (!mounted) return;
+    if (!mounted || _alreadyShow) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -183,7 +185,10 @@ class HomePageState extends State<HomePage> {
           ),
         ],
       ),
-    );
+    ).then((_){
+      _alreadyShow = false;
+    });
+    _alreadyShow = true;
   }
 
   void _openSpeakerManagePage() {
