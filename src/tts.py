@@ -72,6 +72,29 @@ def _clean_text_for_tts(text: str) -> str:
     return cleaned
 
 
+# 句末标点：与 main.py 增量朗读保持一致
+_TTS_SENT_END = "。！？!?；;…\n"
+
+
+def _batch_sentences(text: str, max_sentences: int = 4):
+    """按句末标点切分，每 max_sentences 句一批。长句不一次性整段合成。"""
+    batches = []
+    cur = []
+    count = 0
+    for ch in text:
+        cur.append(ch)
+        if ch in _TTS_SENT_END:
+            count += 1
+            if count >= max_sentences:
+                batches.append("".join(cur))
+                cur = []
+                count = 0
+    tail = "".join(cur)
+    if tail.strip():
+        batches.append(tail)
+    return batches
+
+
 def _play_prebuilt_voice_sync(name: str) -> bool:
     voices_dir = os.path.join(os.path.dirname(__file__), "..", "data", "voices")
     file_path = os.path.join(voices_dir, f"{name}.mp3")
@@ -121,13 +144,17 @@ def text_to_speech_play(text: str, speed: float = 1.0, **kwargs):
                 print("[TTS] TTS 不可用")
                 return
 
-            output_path = _assistant_tts.synthesize(cleaned_text)
-            if output_path:
-                audio.play_audio_file(output_path, volume=1.5, blocking=True)
-                try:
-                    os.unlink(output_path)
-                except Exception:
-                    pass
+            # 长句不一次性整段合成：每 4 句一批，逐批合成并顺序播放
+            for batch in _batch_sentences(cleaned_text, 4):
+                if not _tts_playing.is_set():
+                    break  # 已被 stop_tts 打断
+                output_path = _assistant_tts.synthesize(batch)
+                if output_path:
+                    audio.play_audio_file(output_path, volume=1.5, blocking=True)
+                    try:
+                        os.unlink(output_path)
+                    except Exception:
+                        pass
             print("[TTS] 播放完成")
         except Exception as e:
             print(f"[TTS] 异常: {type(e).__name__}: {e}")

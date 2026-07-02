@@ -4,3 +4,9 @@ j iā w éi s ī :2.0 #0.02 @加维斯
 j iā w éi s :2.0 #0.02 @加维思
 j iǎ w éi s i :2.0 #0.02 @贾威斯
 j iǎ w éi s i :2.0 #0.02 @贾威思
+JH AA1 R V AH0 S :3.0 #0.02 @Jarvis
+JH AA1 R V IH0 S :2.0 #0.02 @Jarvis
+JH AA1 R V IH1 S :2.0 #0.02 @Jarvis
+JH AA1 R W IH0 S :2.0 #0.02 @Jarvis
+JH AA1 V IH0 S :2.0 #0.02 @Jarvis
+JH AA1 R V AH0 Z :2.0 #0.02 @Jarvis

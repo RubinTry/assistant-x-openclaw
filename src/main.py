@@ -525,6 +525,29 @@ def _clean_for_tts(text: str) -> str:
     return text
 
 
+def _batch_sentences(text: str, sent_end: str, max_sentences: int = 4):
+    """把一段文本按句末标点切分，每 max_sentences 句合成一批。
+
+    长句/长段落不再一次性整段合成，而是每 4 句切一刀，逐批送去合成播放，
+    降低首句延迟并避免长文合成阻塞。返回若干文本片段（保留原标点）。
+    """
+    batches = []
+    cur = []
+    count = 0
+    for ch in text:
+        cur.append(ch)
+        if ch in sent_end:
+            count += 1
+            if count >= max_sentences:
+                batches.append("".join(cur))
+                cur = []
+                count = 0
+    tail = "".join(cur)
+    if tail.strip():
+        batches.append(tail)
+    return batches
+
+
 class VoiceAssistant:
     def __init__(
         self, args, default_cfg: dict, all_assistants: list, keyword_mapping: dict
@@ -2055,13 +2078,23 @@ class VoiceAssistant:
             _TTS_DEBOUNCE_SEC = 1.5
             _TTS_SENT_END = "。！？!?；;…\n"
 
-            tts_queue = queue.Queue()
+            synth_queue = queue.Queue()
             tts_buf = {"text": "", "last": time.time()}
             tts_buf_lock = threading.Lock()
             tts_threads_stop = threading.Event()
 
+            # ── 合成/播放流水线：多线程并行合成 + 单线程有序播放 ──────────
+            # 每个切片按入队顺序分配递增 seq。多个合成线程并行把切片合成成
+            # 音频，结果按 seq 存入 results；单个播放线程严格按 seq 0,1,2… 顺序
+            # 播放——靠后的切片即便先合成好也要等前面的，保证播报顺序不乱。
+            # 好处：合成耗时被并行掉，句与句之间几乎无停顿。
+            seq_ctr = {"n": 0}
+            results = {}                  # seq -> (audio, sr) | None(失败/跳过)
+            results_cond = threading.Condition()
+            play_total = {"n": None}      # 生产结束后置为总切片数，播放线程据此收尾
+
             def _flush_segment(force=False):
-                """把缓冲里的完整句子（force 时为剩余全部）送入朗读队列。"""
+                """把缓冲里的完整句子（force 时为剩余全部）按 4 句分批入队合成。"""
                 with tts_buf_lock:
                     buf = tts_buf["text"]
                     if not buf:
@@ -2075,20 +2108,51 @@ class VoiceAssistant:
                         if idx < 0:
                             return
                         seg, tts_buf["text"] = buf[: idx + 1], buf[idx + 1 :]
-                seg = _clean_for_tts(seg)
-                if seg.strip():
-                    tts_queue.put(seg)
+                    seg = _clean_for_tts(seg)
+                    if not seg.strip():
+                        return
+                    # 长句/长段落不一次性整段合成：每 4 句切一批。
+                    # 在锁内分配 seq 并入队，保证多线程（chunk 回调 + flusher）
+                    # 并发调用时切片顺序不乱。
+                    for batch in _batch_sentences(seg, _TTS_SENT_END, 4):
+                        if not batch.strip():
+                            continue
+                        seq = seq_ctr["n"]
+                        seq_ctr["n"] += 1
+                        synth_queue.put((seq, batch))
 
-            def _tts_worker():
+            def _synth_worker():
+                """并行合成：取切片 → 合成 → 按 seq 存结果并通知播放线程。"""
+                while True:
+                    item = synth_queue.get()
+                    if item is None:
+                        break
+                    seq, text = item
+                    result = None
+                    if not self._stop_openclaw_request.is_set():
+                        result = self.tts.synthesize_to_array(text)
+                    with results_cond:
+                        results[seq] = result  # 即便失败/跳过也记 None，避免播放线程死等
+                        results_cond.notify_all()
+
+            def _play_worker():
+                """有序播放：严格按 seq 0,1,2… 顺序，缺哪个等哪个。"""
                 from audio import play_array
 
+                next_seq = 0
                 while True:
-                    seg = tts_queue.get()
-                    if seg is None:
-                        break
-                    if self._stop_openclaw_request.is_set():
-                        continue  # 已打断：排空队列但不播放
-                    result = self.tts.synthesize_to_array(seg)
+                    with results_cond:
+                        while True:
+                            if self._stop_openclaw_request.is_set():
+                                return
+                            if (play_total["n"] is not None
+                                    and next_seq >= play_total["n"]):
+                                return  # 全部切片已播完
+                            if next_seq in results:
+                                break
+                            results_cond.wait(timeout=0.2)
+                        result = results.pop(next_seq)
+                    next_seq += 1
                     if not result or self._stop_openclaw_request.is_set():
                         continue
                     audio_data, sr = result
@@ -2112,9 +2176,18 @@ class VoiceAssistant:
                     if has and idle >= _TTS_DEBOUNCE_SEC:
                         _flush_segment(force=True)
 
-            tts_worker_thread = threading.Thread(target=_tts_worker, daemon=True)
+            # 合成线程数按设备逻辑核数动态决定（不硬编码）：约半数核、至少 1，
+            # 兼顾并行加速与不过度抢占（合成为 CPU 密集，ONNX 内部亦用多线程）。
+            num_synth_workers = max(1, (os.cpu_count() or 2) // 2)
+            synth_threads = [
+                threading.Thread(target=_synth_worker, daemon=True)
+                for _ in range(num_synth_workers)
+            ]
+            play_thread = threading.Thread(target=_play_worker, daemon=True)
             tts_flusher_thread = threading.Thread(target=_tts_flusher, daemon=True)
-            tts_worker_thread.start()
+            for _t in synth_threads:
+                _t.start()
+            play_thread.start()
             tts_flusher_thread.start()
 
             def _openclaw_request():
@@ -2198,12 +2271,17 @@ class VoiceAssistant:
                 reply = data
                 if reply:
                     print()
-                    # 流已结束：停止停顿监控，把剩余缓冲全部入队，再等队列逐句播完
+                    # 流已结束：停止停顿监控，把剩余缓冲全部入队
                     tts_threads_stop.set()
                     if not self._stop_openclaw_request.is_set():
                         _flush_segment(force=True)
-                    tts_queue.put(None)
-                    tts_worker_thread.join()
+                    # 告知播放线程切片总数、唤醒它收尾；停掉各合成线程
+                    with results_cond:
+                        play_total["n"] = seq_ctr["n"]
+                        results_cond.notify_all()
+                    for _t in synth_threads:
+                        synth_queue.put(None)
+                    play_thread.join()
 
                     # TTS播报结束，检查是否被中断
                     if self._stop_openclaw_request.is_set():
@@ -2220,10 +2298,16 @@ class VoiceAssistant:
                 print(f"[OpenClaw] 异常: {data}")
                 self.jarvis.on_error(data)
         finally:
-            # 兜底停掉增量 TTS 线程与残留播放（打断/异常/无回复路径）
+            # 兜底停掉增量 TTS 流水线与残留播放（打断/异常/无回复路径）
             try:
                 tts_threads_stop.set()
-                tts_queue.put(None)
+                # 唤醒播放线程收尾（若未在成功分支设过总数）、停掉合成线程
+                with results_cond:
+                    if play_total["n"] is None:
+                        play_total["n"] = seq_ctr["n"]
+                    results_cond.notify_all()
+                for _ in range(num_synth_workers):
+                    synth_queue.put(None)
                 _tts_playing.clear()
             except Exception:
                 pass
