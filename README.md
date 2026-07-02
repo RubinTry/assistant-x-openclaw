@@ -17,9 +17,9 @@
 - ✅ 连续对话与打断机制
 - ✅ HUD 视觉特效（Flutter 透明窗口）
 - ✅ OpenClaw Gateway 对接大模型
-- ✅ 热词优化
+- ✅ 热词优化 + 文本纠错兜底
 - ✅ API 远程退出
-- ✅ 声纹识别
+- ✅ 声纹识别（唤醒强制验证 + 对话中渐进更新）
 - 活体检测防欺骗（开发中，如：用音响放出的你的声音？？）
 - 自定义角色（实验性阶段）
 
@@ -200,7 +200,7 @@ openclaw devices list
   - [配置退出关键词](#配置退出关键词)
   - [自定义音效](#自定义音效)
 - [高级功能](#高级功能)
-  - [声纹录入](#声纹录入可选)
+  - [声纹验证](#声纹验证唤醒强制校验)
   - [热词优化](#热词优化)
   - [API 接口](#api-接口)
 - [常见问题](#常见问题)
@@ -260,7 +260,7 @@ mkdir models
 ```bash
 python3 -m venv venv
 source ./venv/bin/activate
-venv/bin/pip install --force-reinstall --no-cache -r requirements.txt
+venv/bin/pip install --force-reinstall --no-cache -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
 **Windows：**
@@ -268,8 +268,10 @@ venv/bin/pip install --force-reinstall --no-cache -r requirements.txt
 ```cmd
 python -m venv venv
 .\venv\Scripts\activate
-pip install --force-reinstall --no-cache -r requirements.txt
+pip install --force-reinstall --no-cache -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
+
+> **提示**：`-i https://pypi.tuna.tsinghua.edu.cn/simple` 使用清华 PyPI 镜像加速下载，海外网络环境可去掉该参数走官方源。
 
 
 ### 3. 配置环境变量
@@ -324,15 +326,15 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 | 2 | ASR 语音识别模型 | [sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2) |
 | 3 | VAD 静音检测模型 | [silero_vad_v5.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx)（下载后重命名为 `silero_vad.onnx`） |
 | 4 | SenseVoice 多语言识别模型 | [sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2) |
-| 5 | Jarvis TTS 模型（贾维斯英文语音合成，内置角色必需） | 在models目录执行这条命令：git clone https://huggingface.co/jgkawell/jarvis |
+| 5 | Jarvis TTS 模型（贾维斯英文语音合成，内置角色必需） | [jarvis.zip](https://modelscope.cn/datasets/rubintry/jarvis/resolve/master/jarvis%E8%AF%AD%E9%9F%B3%E6%A8%A1%E5%9E%8B/jarvis.zip)（ModelScope，下载后在 `models/` 目录解压，得到 `models/jarvis/en/en_GB/jarvis/high/jarvis-high.onnx` 即正确）；也可在 `models/` 目录执行 `git clone https://huggingface.co/jgkawell/jarvis` |
 | 6 | VITS MeloTTS 模型（林妹妹中英文语音合成，内置角色必需） | [vits-melo-tts-zh_en.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2) |
-| 7 | 声纹嵌入模型（声纹录入必需） | [3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx) |
+| 7 | 声纹嵌入模型（唤醒声纹验证与录入必需） | [3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx) |
 
 **可选模型（根据需求下载）：**
 
 | # | 模型 | 下载链接 |
 |---|------|----------|
-| 8 | Qwen3-ASR 离线识别模型 | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
+| 8 | Qwen3-ASR 离线识别模型（贾维斯默认 `asr_mode: "offline"` 使用，缺失自动回退流式识别） | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
 | 9 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
 
 ### 5. 准备音效文件（看看就行，懒得换音效的话不用研究）
@@ -406,8 +408,13 @@ unner\Release\` 目录下。
 - **贾维斯**：说"贾维斯"或"加维斯"
 - **林妹妹**：说"林妹妹何在"
 
+唤醒词命中后还要过两道关，都通过才算唤醒成功：
+
+1. **VAD 真人语音确认**：抑制电脑外放的人声/TTS 误触发唤醒词；
+2. **声纹验证**（强制）：取唤醒前最近约 3 秒音频与已注册声纹比对，**未注册声纹或不是本人，唤醒会被直接拒绝**。首次使用请先在控制中心录入声纹（详见下方「声纹验证」）。
+
 唤醒后助手会自动向主脑引擎发送一条 `voice-assistant-wake-up-<本地时间戳>` 消息，
-由引擎返回的内容作为问候语播报（不再是写死的欢迎语）。听到问候后即可开始对话。
+由引擎返回的内容作为问候语播报（不再是写死的欢迎语）。问候在后台线程播报，期间再次说唤醒词可直接打断。听到问候后即可开始对话。
 
 > 需在角色 system prompt 里加一条对该消息的应答规则，否则引擎可能把它当普通输入。
 > 详见 [hermes-assistant.md](./hermes-assistant.md) 第四节（OpenClaw 模式同样适用）。
@@ -432,22 +439,18 @@ unner\Release\` 目录下。
 
 | 角色 | 风格 | 特点 |
 |------|------|------|
-| **贾维斯** | 专业、干练 | 英文 TTS 优先，SenseVoice 英文识别模式，科技感 HUD |
-| **林妹妹** | 亲切、俏皮 | 中文 TTS，多语言识别，粉色主题 HUD |
+| **贾维斯** | 专业、干练 | 英文 TTS（Piper，可叠金属感），Qwen3-ASR 离线识别（模型缺失自动回退流式），科技感 HUD |
+| **林妹妹** | 亲切、俏皮 | 中文 TTS（VITS MeloTTS），流式中英双语识别，粉色主题 HUD |
 
 **如何切换：**
 
-在 `assistants.json` 中修改 `"default"` 字段为你想要的角色 ID，然后重启语音助手：
+**直接说出目标角色的唤醒词即可**——待机时喊"林妹妹何在"就切到林妹妹，喊"贾维斯"就切回贾维斯，运行时自动完成切换（含 TTS/HUD/识别模式），无需改配置、无需重启。
 
-```bash
-# 切换到贾维斯
-# 修改 assistants.json 中 "default": "jarvis"
+`assistants.json` 中的 `"default"` 字段只决定**启动时**默认加载哪个角色：
 
-# 切换到林妹妹  
-# 修改 assistants.json 中 "default": "lin-meimei"
+```json
+{ "default": "jarvis" }
 ```
-
-> **提示**：运行时切换角色会自动应用，无需重启。
 
 ### 连续对话模式
 
@@ -496,7 +499,9 @@ unner\Release\` 目录下。
 | 角色 | 退出关键词示例 |
 |------|----------------|
 | 贾维斯 | "dismissed"、"stand down"、"that's all"、"退下"、"你可以退下了"、"exit"、"quiet"、"SHUT UP" |
-| 林妹妹 | "退下"、"退下吧"、"没事了"、"好了" |
+| 林妹妹 | "退下"、"退下吧"、"好了"、"行了"、"结束"、"你可以退下了" |
+
+完整列表见 `assistants.json` 各角色的 `exit_keywords` 字段。
 
 其中部分关键词会即时退出（不播放告别语）：
 - 贾维斯："stand down"、"you may leave"
@@ -524,8 +529,18 @@ curl -X POST http://127.0.0.1:18790/exit
     "name": "角色名称",
     "enabled": true,
     "visual": "jarvis",
+    "components": {
+        "feedback": "custom",
+        "visual": "custom",
+        "tts": "custom"
+    },
     "keywords_file": "keywords/your-assistant.txt",
     "asr_mode": "streaming",
+    "tts_config": {
+        "engine": "vits",
+        "model_dir": "models/vits-melo-tts-zh_en",
+        "speed": 1.0
+    },
     "wake_lines": ["角色唤醒语1", "角色唤醒语2"],
     "exit_lines": ["角色退出语1", "角色退出语2"],
     "exit_keywords": ["退出关键词1", "退出关键词2"],
@@ -534,6 +549,22 @@ curl -X POST http://127.0.0.1:18790/exit
     "restart_keywords": ["重启", "重新启动"]
 }
 ```
+
+**字段说明：**
+
+- **`components`**：选择该角色的反馈/视觉/TTS 实现。填 `jarvis` 复用贾维斯的内置实现，填 `custom` 走通用模板（`src/assistants/custom_*.py`），可再配合 `feedback_config`（自定义音效文件、HUD 文案、通知前缀）和 `visual_config` 精调，参考 `assistants.json` 里林妹妹的写法。
+- **`asr_mode`**：该角色的语音识别模式，可选值：
+
+  | 取值 | 识别方案 | 说明 |
+  |------|----------|------|
+  | `streaming`（默认） | 流式 Zipformer 中英双语 | 边说边出结果，低延迟，支持热词 |
+  | `sense_voice` | SenseVoice 多语言（自动检测） | VAD 断句，一次返回完整结果 |
+  | `sense_voice_en` | SenseVoice 英文模式 | 同上，仅英文 |
+  | `offline` | Qwen3-ASR 离线识别 | 需下载可选模型第 8 项 |
+
+  对应模型不可用时自动回退到流式模式，不会启动失败。
+- **`tts_config`**：TTS 引擎配置。`engine`/`model_dir` 指定引擎与模型，`speed` 调语速，贾维斯还支持 `metallic` 金属感后处理（见上方「贾维斯金属感语音」）。
+- **`restart_keywords`**：命中后重启整个语音助手（自动执行 `start.sh` / `start.bat`），带幂等保护防止回声重复触发。
 
 2. 在 `keywords/` 目录下创建对应的唤醒词文件（如 `keywords/your-assistant.txt`）
 
@@ -653,19 +684,26 @@ l i n m e i m e i z a i m a :3.0 #0.02 @林妹妹在吗
 
 ## 高级功能
 
-### 声纹录入（可选）
+### 声纹验证（唤醒强制校验）
 
-> **macOS 用户**：直接下载 `control_center.dmg`，安装后在应用内录入即可，无需手动跑下面的脚本。
->
-> **前提**：需下载声纹嵌入模型 `3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx` 放入 `models/` 目录（见上方模型表格第 7 项），否则录入会报错 `No graph was found in the protobuf`。
+声纹验证已是**强制功能**：每次唤醒词命中后，都会取最近约 3 秒音频与已注册声纹比对，通过才放行唤醒。行为规则：
 
-用于验证说话人身份（未来可扩展声纹验证）：
+- **已注册声纹**：只有声纹匹配的说话人能唤醒；验证被拒绝时继续待机，并向控制中心推送一条「声纹验证被拒绝」通知。
+- **未注册任何声纹**：助手**拒绝一切唤醒**，需先录入声纹才能使用（启动日志会给出提示）。
+- **声纹模型文件缺失**：跳过验证直接放行（此时不安全，建议按模型表第 7 项下载 `3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx` 放入 `models/`，缺模型时录入也会报错 `No graph was found in the protobuf`）。
+- **渐进更新**：验证通过后，连续对话中的语音会持续微调该用户的声纹嵌入，越用越准（嵌入缓存在录入 JSON 里）。
+
+**如何录入：**
+
+> **macOS / Windows 用户**：直接在「控制中心」App 内按提示录入即可，无需手动跑脚本。录入期间控制中心会自动调用勿扰接口暂停唤醒（见下方 API 接口），避免反复念"贾维斯"误唤醒。
+
+命令行录入：
 
 ```bash
 ./scripts/enroll_speaker.py
 ```
 
-按提示朗读"贾维斯"即可完成录入，样本保存在 `data/enrollment/` 目录。
+按提示朗读"贾维斯"即可完成录入，样本保存在 `data/enrollment/` 目录。录入完成后重启语音助手生效。
 
 ### 热词优化
 
@@ -686,6 +724,18 @@ FastAPI
 ```
 
 重启语音助手后自动生效。
+
+**文本纠错兜底（text_corrections.txt）：**
+
+sherpa 热词对 cjkchar+bpe 模型下 **OOV 英文整词**（词表里没有的词，如人名、新产品名）几乎无效——整词 token 找不到会被静默跳过。这类词请写进根目录 `text_corrections.txt`，在识别结果送 HUD/大模型之前做整词替换（大小写不敏感）：
+
+```
+# 格式：<误识别> : <正确>
+open cloud : OpenClaw
+贾维尔 : 贾维斯
+```
+
+文件不存在则跳过（纠错是可选功能），启动时加载。
 
 ### API 接口
 
@@ -730,12 +780,17 @@ curl -s http://127.0.0.1:18790/camera/snapshot -o /tmp/cam.jpg   # 成功：JPEG
 
 ## 常见问题
 
-### Q: 唤醒词不灵敏怎么办？
+### Q: 唤醒词不灵敏 / 喊了没反应怎么办？
 
-1. 检查麦克风设备是否正常：启动时会列出可用设备
-2. 调整唤醒词灵敏度：在 `keywords/*.txt` 中提高灵敏度数值（2.0 → 3.0）
-3. 添加更多拼音变体到唤醒词文件
-4. 确保环境安静，背景噪音会影响识别
+1. **先确认声纹**：声纹验证是强制的——未注册声纹会拒绝一切唤醒，非本人喊也会被拒（终端会打印 `[声纹] 唤醒被拒绝`）。先在控制中心录入声纹
+2. 检查麦克风设备是否正常：启动时会列出可用设备
+3. 调整唤醒词灵敏度：在 `keywords/*.txt` 中提高灵敏度数值（2.0 → 3.0）
+4. 添加更多拼音变体到唤醒词文件
+5. 确保环境安静，背景噪音会影响识别；另外唤醒前有 VAD 真人语音确认，电脑外放的人声会被有意忽略
+
+### Q: 语音助手会不会和其他应用抢麦克风？
+
+不会独占采样率。输入流按 48kHz 打开（与大多数应用/系统默认一致，可共存），内部用 soxr 重采样到 16kHz 再喂 sherpa 模型；没装 soxr 时回退原始采样率，识别精度会下降。另外音频流有看门狗：静默停滞超过 15 秒会自动重建流，无需手动重启。
 
 ### Q: 如何查看当前使用的设备？
 
@@ -782,7 +837,7 @@ curl -s http://127.0.0.1:18790/camera/snapshot -o /tmp/cam.jpg   # 成功：JPEG
 ```
 assistant-x-openclaw/
 ├── src/                      # 源代码
-│   ├── main.py               # 主程序：唤醒 + 识别 + 对话流程
+│   ├── main.py               # 主程序：唤醒 + 声纹验证 + 识别 + 对话流程 + 本地 API
 │   ├── tts.py                # TTS 统一接口
 │   ├── tts_vits.py           # VITS TTS 引擎
 │   ├── openclaw_bridge_websocket.py  # OpenClaw Gateway 桥接（engine=openclaw）
@@ -790,29 +845,39 @@ assistant-x-openclaw/
 │   ├── lifecycle.py          # 激活联动钩子注册表（唤醒/休眠边沿派发）
 │   ├── media_pause.py        # 激活联动：唤醒时暂停媒体
 │   ├── dock_control.py       # 激活联动：唤醒时隐藏 Dock（macOS）
+│   ├── camera.py             # 摄像头抓帧（GET /camera/snapshot，macOS）
+│   ├── anti_spoof.py         # 活体检测（AASIST，开发中未启用）
+│   ├── notify_bridge.py      # 向控制中心推送通知（如声纹拒绝）
+│   ├── log_setup.py          # 日志：ERROR 落盘 + diag 诊断日志
 │   ├── audio.py              # 音频播放模块
 │   └── assistants/           # 角色系统
 │       ├── feedback.py       # 反馈系统基类（音效 + HUD + 通知）
 │       ├── visual.py         # HUD 视觉基类
 │       ├── tts.py            # 角色 TTS 基类
-│       ├── jarvis/           # 贾维斯角色（visual/tts/feedback 等）
+│       ├── jarvis/           # 贾维斯角色（Piper/ZipVoice TTS、visual、feedback）
 │       ├── lin_meimei/       # 林妹妹角色
-│       └── custom_*.py       # 自定义角色模板
+│       └── custom_*.py       # 自定义角色模板（components 填 "custom" 时使用）
 ├── scripts/                  # 工具脚本
-│   ├── start.sh              # 启动脚本（macOS）
+│   ├── start.sh              # 启动脚本（macOS：合并唤醒词 + 清理端口 + 拉起 HUD/主程序）
 │   ├── start.bat             # 启动脚本（Windows）
-│   └── enroll_speaker.py     # 声纹录入工具
+│   ├── enroll_speaker.py     # 声纹录入工具
+│   └── hermes_provision.py   # Hermes profile 初始化（engine=hermes 用）
 ├── assistant_overlay/        # Flutter HUD 视觉特效应用
+├── control_center/           # Flutter 控制中心应用（声纹录入 / 启停 / 日志，macOS & Windows）
+├── prompts/                  # 角色 System Prompt（jarvis/SOUL.md）
+├── skills/                   # 主脑技能（browser-cdp / desktop-control）
 ├── data/
-│   └── voices/               # 音效文件
+│   ├── voices/               # 音效文件
+│   └── enrollment/           # 已录入的声纹样本
 ├── models/                   # ONNX 模型文件
 ├── keywords/                 # 唤醒词配置
 │   ├── jarvis.txt
 │   ├── lin-meimei.txt
 │   └── global.txt            # 自动生成，合并所有唤醒词
-├── assistants.json           # 角色配置文件
+├── assistants.json           # 角色与引擎配置文件
 ├── hotwords.txt              # 中文热词
 ├── hotwords_en.txt           # 英文热词
+├── text_corrections.txt      # 文本纠错表（OOV 英文整词兜底）
 ├── .env                      # 环境变量
 └── requirements.txt          # Python 依赖
 ```
