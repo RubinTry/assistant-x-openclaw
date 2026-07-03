@@ -161,7 +161,7 @@ openclaw devices list
 - 想去掉某个滤镜：删掉该行，或把值留空（会自动跳过）。
 - 金属感太强 → 调小 `aecho` 衰减、`chorus` 深度；太弱 → 调大 `treble` 的 `g`、加重 `aecho`。
 - 改完**重启**生效（配置在角色创建时读取）。
-- **ffmpeg 依赖：随 pip 自带，无需系统安装**。`requirements.txt` 已含 `imageio-ffmpeg`，它会带一份跨平台（macOS/Linux/Windows）静态 ffmpeg 二进制，`pip install -r requirements.txt` 装完即可用，**免 brew/apt、免折腾 PATH**。
+- **ffmpeg 依赖：随 pip 自带，无需系统安装**。`requirements.txt` 已含 `imageio-ffmpeg`，它会带一份跨平台（macOS/Windows）静态 ffmpeg 二进制，`pip install -r requirements.txt` 装完即可用，**免 brew/apt、免折腾 PATH**。
   - 解析优先级见 [tts_piper.py](src/assistants/jarvis/tts_piper.py)：① pip 包 imageio-ffmpeg（主路径）→ ② 系统 ffmpeg（`shutil.which` + 常见安装位置，兜底）。
   - 万一两者都没有，**也不会报错**——自动回退纯 Piper 原声，仅在启动日志给一条提示。
   - 可选覆盖：设环境变量 `FFMPEG_BIN` 指向自定义 ffmpeg 可执行文件。
@@ -240,6 +240,14 @@ openclaw devices list
 
 ## 快速开始
 
+### 0. 环境要求
+
+- **Python 3.11.x（推荐）**：本项目在 Python 3.11 下开发验证；3.10 理论可用但未测试，3.12+ 部分依赖（sherpa-onnx / onnxruntime）可能缺预编译轮子，暂不建议。
+- **操作系统**：macOS / Windows，linux暂无开发打算
+- **OpenClaw Gateway**：需已安装并可运行，见上文[前置说明](#前置说明)。
+
+> 金属感语音后处理所需的 **ffmpeg 已通过 `imageio-ffmpeg` 内置**，无需系统单独安装或配置 PATH。
+
 ### 1. 克隆项目
 
 
@@ -255,7 +263,7 @@ mkdir models
 
 创建虚拟环境并安装依赖：
 
-**macOS / Linux：**
+**macOS**
 
 ```bash
 python3 -m venv venv
@@ -317,7 +325,7 @@ OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 
 **必需模型：**
 
-点击下方链接下载，将文件放入 `models/` 目录，`.tar.bz2` 文件需解压（Windows 可用 7-Zip，macOS/Linux 用 `tar xf`）：
+点击下方链接下载，将文件放入 `models/` 目录，`.tar.bz2` 文件需解压（Windows 可用 7-Zip，macOS 用 `tar xf`）：
 
 | # | 模型 | 下载链接 |
 |---|------|----------|
