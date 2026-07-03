@@ -263,7 +263,7 @@ mkdir models
 
 创建虚拟环境并安装依赖：
 
-**macOS / Linux：**
+**macOS**
 
 ```bash
 python3 -m venv venv
