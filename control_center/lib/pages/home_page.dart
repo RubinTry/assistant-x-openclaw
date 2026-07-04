@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../services/service_factory.dart';
 import '../models/log_entry.dart';
 import 'speaker_manage_page.dart';
+import 'model_manage_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -553,6 +554,17 @@ class HomePageState extends State<HomePage> {
             },
             icon: const Icon(Icons.person),
             label: const Text('声纹管理'),
+          ),
+          const SizedBox(width: 16),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ModelManagePage()),
+              );
+            },
+            icon: const Icon(Icons.bolt),
+            label: const Text('模型管理'),
           ),
         ],
       ),
