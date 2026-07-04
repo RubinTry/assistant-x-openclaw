@@ -78,10 +78,15 @@ def _routing_system_prompt(agent_name: str, persona: str) -> str:
 
 
 class FastPathClient:
-    def __init__(self, should_stop=None, agent_name: str = "", persona: str = ""):
+    def __init__(self, should_stop=None, agent_name: str = "", persona: str = "",
+                 history_reader=None):
         self._should_stop = should_stop or (lambda: False)
         self.agent_name = agent_name
         self.persona = persona
+        # 引擎 session/memory 读取器（IHistoryReader）：让轻消息也拿到 agent lane 的
+        # 近期对话、长期记忆与用户画像。为空则退化为无引擎上下文。
+        self.history_reader = history_reader
+        # 快 lane 自身滚动历史：引擎里没有（快答不写回），用于连续快轮的即时连续性。
         self._history = deque(maxlen=_HISTORY_TURNS * 2)  # 交替 user/assistant
 
     # ── 生命周期辅助 ────────────────────────────────────────────────
@@ -92,9 +97,48 @@ class FastPathClient:
     def set_persona(self, persona: str) -> None:
         self.persona = persona or ""
 
+    def set_history_reader(self, reader) -> None:
+        self.history_reader = reader
+
     def reset(self) -> None:
         """清空快路径滚动上下文（角色切换 / 退下时调用）。"""
         self._history.clear()
+
+    def _build_system_prompt(self, text: str) -> str:
+        """路由人设 + 引擎注入的用户画像 + 相关记忆。"""
+        parts = [_routing_system_prompt(self.agent_name, self.persona)]
+        hr = self.history_reader
+        if hr is not None:
+            try:
+                if hr.is_available():
+                    profile = hr.user_profile()
+                    if profile:
+                        parts.append(f"# About the user (from long-term memory)\n{profile}")
+                    mem = hr.search_memory(text)
+                    if mem:
+                        parts.append(
+                            "# Possibly relevant memory (may be stale; use judgment)\n"
+                            + "\n".join(f"- {m}" for m in mem)
+                        )
+            except Exception:  # noqa: BLE001 — 记忆注入永不影响主流程
+                pass
+        return "\n\n".join(parts)
+
+    def _prior_messages(self) -> list[dict]:
+        """近期对话：引擎 session（agent lane）+ 快 lane 内部历史，供上下文连续性。"""
+        msgs: list[dict] = []
+        hr = self.history_reader
+        if hr is not None:
+            try:
+                if hr.is_available():
+                    for t in hr.recent_turns(limit=_HISTORY_TURNS * 2):
+                        content = (t.get("content") or "")[:400]
+                        if content and t.get("role") in ("user", "assistant"):
+                            msgs.append({"role": t["role"], "content": content})
+            except Exception:  # noqa: BLE001
+                pass
+        msgs.extend(self._history)
+        return msgs
 
     # ── 主入口（与桥 drop-in 同签名）─────────────────────────────────
     def send_and_wait_stream(self, text, on_chunk=None, on_start=None,
@@ -106,9 +150,8 @@ class FastPathClient:
         url = cfg["base_url"].rstrip("/") + "/chat/completions"
         headers = {"Authorization": f"Bearer {cfg['api_key']}",
                    "Content-Type": "application/json"}
-        messages = [{"role": "system",
-                     "content": _routing_system_prompt(self.agent_name, self.persona)}]
-        messages.extend(self._history)
+        messages = [{"role": "system", "content": self._build_system_prompt(text)}]
+        messages.extend(self._prior_messages())
         messages.append({"role": "user", "content": text})
         payload = {
             "model": cfg["model"],

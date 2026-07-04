@@ -1093,6 +1093,7 @@ class VoiceAssistant:
         # 未配置模型表时 is_available()=False，_route_stream 自动全走 agent，零行为变化。
         try:
             from fast_path import FastPathClient
+            engine = _load_engine()
             self._fast_path = FastPathClient(
                 should_stop=self._stop_openclaw_request.is_set,
                 agent_name=self.current_cfg.get("name") or assistant_id,
@@ -1101,12 +1102,22 @@ class VoiceAssistant:
             # 让闲聊也像 jarvis / 林妹妹本人（openclaw 与 hermes 各自 SOUL 位置不同）。
             try:
                 from persona_loader import load_persona
-                persona = load_persona(_load_engine(), assistant_id)
+                persona = load_persona(engine, assistant_id)
                 if persona:
                     self._fast_path.set_persona(persona)
-                    print(f"[分流] 已注入 {assistant_id} 人设（{len(persona)} 字，引擎 {_load_engine()}）")
+                    print(f"[分流] 已注入 {assistant_id} 人设（{len(persona)} 字，引擎 {engine}）")
             except Exception as e:  # noqa: BLE001 — 人设可选，失败退化为无人格
                 print(f"[分流] 人设加载失败（忽略）: {e}")
+            # session/memory 读取器：让轻消息也能拿到 agent lane 的近期对话与长期记忆，
+            # 消除"轻消息丢往期上下文"的分叉（本地直读，fail-open）。
+            try:
+                from history_reader import get_history_reader
+                reader = get_history_reader(engine, assistant_id)
+                if reader is not None:
+                    self._fast_path.set_history_reader(reader)
+                    print(f"[分流] 已挂载 {engine} 历史读取器（available={reader.is_available()}）")
+            except Exception as e:  # noqa: BLE001 — 历史读取可选，失败退化为无引擎上下文
+                print(f"[分流] 历史读取器挂载失败（忽略）: {e}")
         except Exception as e:  # noqa: BLE001 — 快路径不可用绝不能拖垮桥初始化
             print(f"[分流] 快路径初始化失败（忽略，全走 agent）: {e}")
             self._fast_path = None
