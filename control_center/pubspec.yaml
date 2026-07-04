@@ -20,6 +20,7 @@ dependencies:
   path_provider: ^2.1.5
   image: ^4.5.2
   flutter_local_notifications: ^17.2.3
+  bitsdojo_window: ^0.1.6
 
 dev_dependencies:
   flutter_test:
