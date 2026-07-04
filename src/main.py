@@ -1170,6 +1170,16 @@ class VoiceAssistant:
                 should_stop=self._stop_openclaw_request.is_set,
                 agent_name=self.current_cfg.get("name") or assistant_id,
             )
+            # 人设跟随当前引擎 + 当前角色：从 SOUL 文件取精简人格注入快路径，
+            # 让闲聊也像 jarvis / 林妹妹本人（openclaw 与 hermes 各自 SOUL 位置不同）。
+            try:
+                from persona_loader import load_persona
+                persona = load_persona(_load_engine(), assistant_id)
+                if persona:
+                    self._fast_path.set_persona(persona)
+                    print(f"[分流] 已注入 {assistant_id} 人设（{len(persona)} 字，引擎 {_load_engine()}）")
+            except Exception as e:  # noqa: BLE001 — 人设可选，失败退化为无人格
+                print(f"[分流] 人设加载失败（忽略）: {e}")
         except Exception as e:  # noqa: BLE001 — 快路径不可用绝不能拖垮桥初始化
             print(f"[分流] 快路径初始化失败（忽略，全走 agent）: {e}")
             self._fast_path = None

@@ -49,10 +49,19 @@ class AgentHandoff(Exception):
 
 
 def _routing_system_prompt(agent_name: str, persona: str) -> str:
-    who = f"You are {agent_name}." if agent_name else "You are a helpful voice assistant."
-    persona_block = f"\n{persona.strip()}\n" if persona and persona.strip() else ""
+    if persona and persona.strip():
+        # 有 SOUL 精简人设：以角色圣经开场，快路径回答须完全保持这个角色。
+        who = (
+            f"# Your character\n{persona.strip()}\n\n"
+            "Stay fully in this character in every spoken reply below.\n\n"
+        )
+    else:
+        who = (
+            f"You are {agent_name}.\n\n" if agent_name
+            else "You are a helpful voice assistant.\n\n"
+        )
     return (
-        f"{who}{persona_block}\n"
+        f"{who}"
         "You are the fast first-line responder for a voice assistant. For the user's "
         "message, decide:\n"
         "- If you can FULLY answer it yourself right now — greetings, chit-chat, "
