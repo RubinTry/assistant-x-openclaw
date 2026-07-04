@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../services/service_factory.dart';
 import '../models/log_entry.dart';
+import '../theme.dart';
 import 'speaker_manage_page.dart';
 import 'model_manage_page.dart';
 
@@ -448,8 +449,7 @@ class HomePageState extends State<HomePage> {
           child: Scaffold(
             body: Column(
               children: [
-                _buildHeader(),
-                _buildControls(),
+                _buildTopBar(),
                 Expanded(child: _buildLogConsole()),
               ],
             ),
@@ -459,86 +459,59 @@ class HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildHeader() {
+  /// 顶栏：左侧品牌 + 运行状态胶囊；右侧启动/停止 + 管理页入口。
+  Widget _buildTopBar() {
     return Container(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.mic,
-                size: 32,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 12),
-              Text(
-                '语音助手控制中心',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _isRunning ? const Color(0xFF4CAF50) : Colors.grey,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _isRunning ? '运行中' : '已停止',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.secondary,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildControls() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          ElevatedButton.icon(
-            onPressed: _isRunning ? null : _start,
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('启动'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
+          // 品牌区
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.mic, size: 20, color: AppColors.accent),
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            '语音助手控制中心',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(width: 16),
-          ElevatedButton.icon(
-            onPressed: _isRunning ? _stop : null,
-            icon: const Icon(Icons.stop),
-            label: const Text('停止'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+          const SizedBox(width: 12),
+          StatusPill(active: _isRunning),
+          const Spacer(),
+          // 主操作：启动 / 停止（一次只亮一个，避免红绿双雄并立）
+          if (!_isRunning)
+            FilledButton.icon(
+              onPressed: _start,
+              icon: const Icon(Icons.play_arrow, size: 18),
+              label: const Text('启动'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.success,
+                foregroundColor: const Color(0xFF06281A),
+              ),
+            )
+          else
+            FilledButton.icon(
+              onPressed: _stop,
+              icon: const Icon(Icons.stop, size: 18),
+              label: const Text('停止'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.danger.withValues(alpha: 0.16),
+                foregroundColor: AppColors.danger,
+              ),
             ),
-          ),
-          const SizedBox(width: 16),
-          OutlinedButton.icon(
-            onPressed: _clearConsole,
-            icon: const Icon(Icons.clear_all),
-            label: const Text('清空控制台'),
-          ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
+          Container(width: 1, height: 24, color: AppColors.border),
+          const SizedBox(width: 12),
+          // 管理入口
           OutlinedButton.icon(
             onPressed: () {
               Navigator.push(
@@ -552,10 +525,10 @@ class HomePageState extends State<HomePage> {
                 ),
               );
             },
-            icon: const Icon(Icons.person),
+            icon: const Icon(Icons.person_outline, size: 18),
             label: const Text('声纹管理'),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 10),
           OutlinedButton.icon(
             onPressed: () {
               Navigator.push(
@@ -563,7 +536,7 @@ class HomePageState extends State<HomePage> {
                 MaterialPageRoute(builder: (_) => const ModelManagePage()),
               );
             },
-            icon: const Icon(Icons.bolt),
+            icon: const Icon(Icons.bolt_outlined, size: 18),
             label: const Text('模型管理'),
           ),
         ],
@@ -571,35 +544,69 @@ class HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildLogConsole() {
-    return Container(
-      margin: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade800),
+  /// 控制台头部的轻量操作按钮（图标 + 文案）。
+  Widget _consoleAction(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 14, color: AppColors.textMuted),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildLogConsole() {
+    return Panel(
+      margin: const EdgeInsets.fromLTRB(20, 4, 20, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Text(
-              '控制台输出',
-              style: TextStyle(
-                color: Colors.grey.shade400,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: const BoxDecoration(
+              color: AppColors.surfaceHigh,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(AppShape.radius)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.terminal, size: 14, color: AppColors.textMuted),
+                const SizedBox(width: 8),
+                const Text(
+                  '控制台输出',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${_logs.length} 行',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+                const SizedBox(width: 12),
+                _consoleAction(Icons.clear_all, '清空', _clearConsole),
+              ],
             ),
           ),
-          const Divider(height: 1, color: Colors.grey),
+          const Divider(height: 1),
           Expanded(
             child: _logs.isEmpty
-                ? Center(
+                ? const Center(
                     child: Text(
                       '暂无日志输出',
-                      style: TextStyle(color: Colors.grey.shade600),
+                      style: TextStyle(color: AppColors.textMuted),
                     ),
                   )
                 : Listener(
@@ -642,14 +649,15 @@ class HomePageState extends State<HomePage> {
                               behavior: HitTestBehavior.opaque,
                               child: Container(
                                 color: _selected.contains(index)
-                                    ? const Color(0x553B82F6)
+                                    ? AppColors.consoleSelection
                                     : null,
                                 child: Text(
                                   '[${log.formattedTimestamp}] ${log.message}',
                                   style: const TextStyle(
                                     fontFamily: 'monospace',
                                     fontSize: 12,
-                                    color: Color(0xFFE0E0E0),
+                                    height: 1.5,
+                                    color: AppColors.consoleText,
                                   ),
                                 ),
                               ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/model_service.dart';
+import '../theme.dart';
 
 /// 快路径模型管理页。
 ///
@@ -63,11 +64,16 @@ class _ModelManagePageState extends State<ModelManagePage> {
         content: Text('删除模型「${entry.label}」？'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
-          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除', style: TextStyle(color: Colors.red)),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.danger.withValues(alpha: 0.16),
+              foregroundColor: AppColors.danger,
+            ),
+            child: const Text('删除'),
           ),
         ],
       ),
@@ -92,8 +98,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -105,12 +110,15 @@ class _ModelManagePageState extends State<ModelManagePage> {
           IconButton(
             tooltip: '刷新',
             onPressed: _loading ? null : _reload,
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, size: 20),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openEditor(),
+        backgroundColor: AppColors.accent,
+        foregroundColor: const Color(0xFF07231F),
         icon: const Icon(Icons.add),
         label: const Text('添加模型'),
       ),
@@ -120,114 +128,235 @@ class _ModelManagePageState extends State<ModelManagePage> {
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.accent),
+      );
     }
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off, size: 56, color: Colors.grey.shade400),
-            const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: Colors.grey.shade600)),
-            const SizedBox(height: 12),
-            OutlinedButton(onPressed: _reload, child: const Text('重试')),
-          ],
-        ),
+      return _EmptyState(
+        icon: Icons.cloud_off,
+        title: '无法读取模型表',
+        subtitle: _error!,
+        action: OutlinedButton(onPressed: _reload, child: const Text('重试')),
       );
     }
     final models = _table?.models ?? [];
     if (models.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.bolt, size: 64, color: Colors.grey.shade400),
-            const SizedBox(height: 12),
-            Text('还没有配置快路径模型',
-                style: TextStyle(color: Colors.grey.shade600)),
-            const SizedBox(height: 4),
-            Text('点右下角「添加模型」，须通过工具调用校验',
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-          ],
-        ),
+      return const _EmptyState(
+        icon: Icons.bolt_outlined,
+        title: '还没有配置快路径模型',
+        subtitle: '点右下角「添加模型」，须通过工具调用校验才能保存',
       );
     }
     final current = _table?.current;
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: models.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (_, i) => _buildTile(models[i], models[i].id == current),
+    return Column(
+      children: [
+        _buildInfoBar(),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 96),
+            itemCount: models.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (_, i) =>
+                _buildTile(models[i], models[i].id == current),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 顶部说明条：解释「使用中」的含义。
+  Widget _buildInfoBar() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.accent.withValues(alpha: 0.08),
+        borderRadius: AppShape.borderRadius,
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, size: 16, color: AppColors.accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '「使用中」的模型作为分流快路径的第一线：轻消息直接回答，重消息经工具调用转交主脑。',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildTile(ModelEntry e, bool isCurrent) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isCurrent ? Colors.teal : Colors.grey.shade800,
-          width: isCurrent ? 1.6 : 1,
-        ),
-      ),
-      child: ListTile(
-        leading: Radio<bool>(
-          value: true,
-          groupValue: isCurrent ? true : null,
-          onChanged: isCurrent ? null : (_) => _setCurrent(e.id),
-          toggleable: false,
-        ),
-        title: Row(
-          children: [
-            Flexible(
-                child: Text(e.label,
-                    style: const TextStyle(fontWeight: FontWeight.w600))),
-            if (isCurrent)
-              Container(
-                margin: const EdgeInsets.only(left: 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.teal.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Text('使用中',
-                    style: TextStyle(color: Colors.teal, fontSize: 11)),
-              ),
-          ],
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Column(
+    return Panel(
+      borderColor: isCurrent ? AppColors.accent : AppColors.border,
+      borderWidth: isCurrent ? 1.5 : 1,
+      child: InkWell(
+        borderRadius: AppShape.borderRadius,
+        onTap: isCurrent ? null : () => _setCurrent(e.id),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('${e.provider.isEmpty ? "-" : e.provider} · ${e.model}',
-                  style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
-              Text(e.baseUrl,
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
-              Text('key ${e.apiKeySet ? e.apiKeyMasked : "未设置"}',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+              // 单选指示
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  isCurrent
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  size: 20,
+                  color: isCurrent ? AppColors.accent : AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(width: 12),
+              // 主体信息
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            e.label,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        if (isCurrent) ...[
+                          const SizedBox(width: 8),
+                          _tag('使用中', AppColors.accent),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    _metaRow(Icons.dns_outlined,
+                        '${e.provider.isEmpty ? "—" : e.provider} · ${e.model}'),
+                    const SizedBox(height: 3),
+                    _metaRow(Icons.link, e.baseUrl),
+                    const SizedBox(height: 3),
+                    _metaRow(
+                      Icons.key_outlined,
+                      e.apiKeySet ? e.apiKeyMasked : '未设置',
+                    ),
+                  ],
+                ),
+              ),
+              // 操作
+              Column(
+                children: [
+                  IconButton(
+                    tooltip: '编辑',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    color: AppColors.textSecondary,
+                    onPressed: () => _openEditor(entry: e),
+                  ),
+                  IconButton(
+                    tooltip: '删除',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    color: AppColors.danger,
+                    onPressed: () => _delete(e),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
-        isThreeLine: true,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: '编辑',
-              icon: const Icon(Icons.edit, size: 20),
-              onPressed: () => _openEditor(entry: e),
+      ),
+    );
+  }
+
+  Widget _metaRow(IconData icon, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 13, color: AppColors.textMuted),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+              height: 1.3,
             ),
-            IconButton(
-              tooltip: '删除',
-              icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-              onPressed: () => _delete(e),
-            ),
-          ],
+          ),
         ),
+      ],
+    );
+  }
+
+  Widget _tag(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+/// 空/错误态占位。
+class _EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget? action;
+
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.action,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 56, color: AppColors.textMuted),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+            ),
+          ),
+          if (action != null) ...[const SizedBox(height: 16), action!],
+        ],
       ),
     );
   }
@@ -250,6 +379,7 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
   late final TextEditingController _model;
   late final TextEditingController _apiKey;
   bool _busy = false;
+  bool _obscureKey = true;
   ProbeResult? _probe;
   String? _formError;
 
@@ -277,7 +407,9 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
   }
 
   String? _validateForm() {
-    if (_baseUrl.text.trim().isEmpty) return 'Base URL 必填（OpenAI 标准，如 https://api.deepseek.com/v1）';
+    if (_baseUrl.text.trim().isEmpty) {
+      return 'Base URL 必填（OpenAI 标准，如 https://api.deepseek.com/v1）';
+    }
     if (_model.text.trim().isEmpty) return 'Model 必填';
     // 新增必须有 key；编辑留空表示保持原 key
     if (!_isEdit && _apiKey.text.trim().isEmpty) return '新增模型必须填 API Key';
@@ -316,7 +448,8 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
 
       await widget.service.upsert(
         id: widget.entry?.id,
-        label: _label.text.trim().isEmpty ? _model.text.trim() : _label.text.trim(),
+        label:
+            _label.text.trim().isEmpty ? _model.text.trim() : _label.text.trim(),
         provider: _provider.text.trim(),
         baseUrl: _baseUrl.text.trim(),
         model: _model.text.trim(),
@@ -336,27 +469,32 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_isEdit ? '编辑模型' : '添加模型'),
+      title: Row(
+        children: [
+          Icon(_isEdit ? Icons.edit_outlined : Icons.add, size: 18),
+          const SizedBox(width: 8),
+          Text(_isEdit ? '编辑模型' : '添加模型'),
+        ],
+      ),
       content: SizedBox(
-        width: 460,
+        width: 480,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               _field(_label, '显示名称', hint: '如 DeepSeek Chat（留空用 model）'),
               _field(_provider, 'Provider', hint: '展示用标签，如 deepseek'),
-              _field(_baseUrl, 'Base URL *',
+              _field(_baseUrl, 'Base URL',
+                  required: true,
                   hint: 'OpenAI 标准，如 https://api.deepseek.com/v1'),
-              _field(_model, 'Model *', hint: '如 deepseek-chat'),
-              _field(_apiKey, 'API Key',
-                  hint: _isEdit ? '留空 = 不修改原 key' : '必填',
-                  obscure: true),
+              _field(_model, 'Model', required: true, hint: '如 deepseek-chat'),
+              _keyField(),
               if (_formError != null) ...[
-                const SizedBox(height: 10),
-                _banner(_formError!, Colors.red),
+                const SizedBox(height: 12),
+                _banner(_formError!, AppColors.danger, Icons.error_outline),
               ],
               if (_probe != null) ...[
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 _probeReport(_probe!),
               ],
             ],
@@ -374,8 +512,12 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.verified),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF07231F),
+                  ),
+                )
+              : const Icon(Icons.verified_outlined, size: 18),
           label: Text(_busy ? '校验中…' : '校验并保存'),
         ),
       ],
@@ -383,71 +525,122 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
   }
 
   Widget _field(TextEditingController c, String label,
-      {String? hint, bool obscure = false}) {
+      {String? hint, bool required = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: TextField(
         controller: c,
-        obscureText: obscure,
         decoration: InputDecoration(
-          labelText: label,
+          labelText: required ? '$label *' : label,
           hintText: hint,
-          border: const OutlineInputBorder(),
-          isDense: true,
         ),
       ),
     );
   }
 
-  Widget _banner(String text, Color color) {
+  Widget _keyField() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: TextField(
+        controller: _apiKey,
+        obscureText: _obscureKey,
+        decoration: InputDecoration(
+          labelText: _isEdit ? 'API Key' : 'API Key *',
+          hintText: _isEdit ? '留空 = 不修改原 key' : '必填',
+          suffixIcon: IconButton(
+            icon: Icon(
+              _obscureKey ? Icons.visibility_off : Icons.visibility,
+              size: 18,
+              color: AppColors.textMuted,
+            ),
+            onPressed: () => setState(() => _obscureKey = !_obscureKey),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _banner(String text, Color color, IconData icon) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
+        color: color.withValues(alpha: 0.1),
+        borderRadius: AppShape.borderRadius,
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
-      child: Text(text, style: TextStyle(color: color, fontSize: 12)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: TextStyle(color: color, fontSize: 12)),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _probeReport(ProbeResult p) {
     Widget row(String label, bool ok) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: 3),
           child: Row(
             children: [
-              Icon(ok ? Icons.check_circle : Icons.cancel,
-                  size: 16, color: ok ? Colors.teal : Colors.red),
-              const SizedBox(width: 6),
-              Text(label, style: const TextStyle(fontSize: 12)),
+              Icon(
+                ok ? Icons.check_circle : Icons.cancel,
+                size: 15,
+                color: ok ? AppColors.success : AppColors.danger,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
             ],
           ),
         );
-    final color = p.ok ? Colors.teal : Colors.orange;
+    final color = p.ok ? AppColors.success : AppColors.warning;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: AppShape.borderRadius,
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(p.ok ? '校验通过 ✓' : '校验未通过',
-              style: TextStyle(
-                  color: color, fontWeight: FontWeight.w600, fontSize: 13)),
-          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(p.ok ? Icons.verified : Icons.warning_amber_rounded,
+                  size: 16, color: color),
+              const SizedBox(width: 6),
+              Text(
+                p.ok ? '校验通过' : '校验未通过',
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           row('端点可达', p.reachable),
           row('鉴权有效', p.authOk),
           row('模型有效', p.modelOk),
           row('支持工具调用（分流升级必需）', p.toolSupport),
           if (p.message.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(p.message,
-                style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
+            const SizedBox(height: 8),
+            Text(
+              p.message,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+            ),
           ],
         ],
       ),

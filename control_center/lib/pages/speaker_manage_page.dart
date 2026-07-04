@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/service_factory.dart';
+import '../theme.dart';
 
 class SpeakerManagePage extends StatefulWidget {
   final void Function(String)? onLog;
@@ -174,32 +175,64 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.accent),
+            )
           : _speakers.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.person_off, size: 64, color: Colors.grey.shade400),
+                      const Icon(Icons.record_voice_over_outlined,
+                          size: 56, color: AppColors.textMuted),
                       const SizedBox(height: 16),
-                      Text(
+                      const Text(
                         '暂无已注册的声纹样本',
-                        style: TextStyle(color: Colors.grey.shade600),
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '注册后可用声纹验证唤醒，防止他人冒用',
+                        style: TextStyle(
+                            color: AppColors.textMuted, fontSize: 12),
                       ),
                     ],
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
+              : ListView.separated(
+                  padding: const EdgeInsets.all(20),
                   itemCount: _speakers.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (ctx, i) {
                     final speaker = _speakers[i];
-                    return Card(
+                    return Panel(
                       child: ListTile(
-                        leading: const CircleAvatar(child: Icon(Icons.person)),
-                        title: Text(speaker),
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.person_outline,
+                              color: AppColors.accent, size: 20),
+                        ),
+                        title: Text(
+                          speaker,
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                         trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
+                          icon: const Icon(Icons.delete_outline,
+                              color: AppColors.danger, size: 20),
                           onPressed: () => _deleteSpeaker(i),
                         ),
                       ),
