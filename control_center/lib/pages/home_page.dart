@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../services/service_factory.dart';
@@ -22,9 +25,13 @@ class HomePageState extends State<HomePage> {
   static const int _maxLogs = 1000;
   final _scrollController = ScrollController();
   bool _isRunning = false;
-  // 「假全选」标志：虚拟化下无法原生选中屏幕外的行，改为给每一行渲染时刷选中底色。
-  // 因底色在 itemBuilder 里按此标志绘制，滚动到任意行都是高亮的，视觉上等同全选。
-  bool _allSelected = false;
+  // 选中的日志行下标集合。支持：Cmd/Ctrl+A 全选、Ctrl/Cmd+左键点选、左键拖拽框选。
+  // 下标随 _logs 增长/裁剪而漂移，裁剪时在 outputStream 回调里同步平移。
+  final _selected = <int>{};
+  // 拖拽框选的锚点行；为 null 表示当前没有进行中的拖拽。
+  int? _dragAnchor;
+  // 日志列表的 RenderBox key，用于把指针坐标命中到具体行下标。
+  final _listKey = GlobalKey();
   ServerSocket? _tcpServer;
   static const int _speakerRejectedPort = 18792;
 
@@ -44,7 +51,22 @@ class HomePageState extends State<HomePage> {
       setState(() {
         _logs.add(LogEntry(timestamp: DateTime.now(), message: msg));
         if (_logs.length > _maxLogs) {
-          _logs.removeRange(0, _logs.length - _maxLogs);
+          final removed = _logs.length - _maxLogs;
+          _logs.removeRange(0, removed);
+          // 前部裁掉 removed 行后所有下标左移；平移选中集合与拖拽锚点，丢弃被裁掉的行。
+          if (_selected.isNotEmpty) {
+            final shifted = _selected
+                .map((i) => i - removed)
+                .where((i) => i >= 0)
+                .toSet();
+            _selected
+              ..clear()
+              ..addAll(shifted);
+          }
+          if (_dragAnchor != null) {
+            _dragAnchor = _dragAnchor! - removed;
+            if (_dragAnchor! < 0) _dragAnchor = null;
+          }
         }
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -75,11 +97,17 @@ class HomePageState extends State<HomePage> {
       );
       const settings = InitializationSettings(macOS: darwin);
       await _notifications.initialize(settings);
-      final macPlugin = _notifications.resolvePlatformSpecificImplementation<
-          MacOSFlutterLocalNotificationsPlugin>();
+      final macPlugin = _notifications
+          .resolvePlatformSpecificImplementation<
+            MacOSFlutterLocalNotificationsPlugin
+          >();
       // notDetermined（从未决定）时这一步会弹系统授权框；
       // 已被用户在系统设置中关闭（denied）时，macOS 不会再弹框，request 静默返回。
-      await macPlugin?.requestPermissions(alert: true, sound: true, badge: false);
+      await macPlugin?.requestPermissions(
+        alert: true,
+        sound: true,
+        badge: false,
+      );
       _notificationsReady = true;
       // 每次启动都检查实际权限状态：若处于关闭态，系统不会自动弹框，
       // 改为应用内引导用户去系统设置手动开启。
@@ -124,7 +152,10 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _showSystemNotification(
-      String title, String text, bool sound) async {
+    String title,
+    String text,
+    bool sound,
+  ) async {
     if (!_notificationsReady) return;
     try {
       final details = NotificationDetails(
@@ -191,7 +222,7 @@ class HomePageState extends State<HomePage> {
           ),
         ],
       ),
-    ).then((_){
+    ).then((_) {
       _alreadyShow = false;
     });
     _alreadyShow = true;
@@ -234,28 +265,106 @@ class HomePageState extends State<HomePage> {
   void _clearConsole() {
     setState(() {
       _logs.clear();
-      _allSelected = false;
+      _selected.clear();
+      _dragAnchor = null;
     });
   }
 
-  /// 全选（Cmd/Ctrl+A）：仅置高亮标志，让每行渲染时刷选中底色。
+  /// 全选（Cmd/Ctrl+A）：把全部行下标塞进选中集合。
   void _selectAllLogs() {
-    if (_logs.isEmpty || _allSelected) return;
-    setState(() => _allSelected = true);
+    if (_logs.isEmpty) return;
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(List.generate(_logs.length, (i) => i));
+    });
   }
 
-  /// 取消选中（点击控制台或 Esc）。
+  /// 取消选中（点击空白处或 Esc）。
   void _clearSelection() {
-    if (!_allSelected) return;
-    setState(() => _allSelected = false);
+    if (_selected.isEmpty) return;
+    setState(() {
+      _selected.clear();
+      _dragAnchor = null;
+    });
   }
 
-  /// 复制（Cmd/Ctrl+C）：仅在已全选时，把完整日志缓冲拷进剪贴板。
+  /// 复制（Cmd/Ctrl+C）：把选中的行按顺序拷进剪贴板。
   void _copySelectedLogs() {
-    if (!_allSelected || _logs.isEmpty) return;
-    final text =
-        _logs.map((log) => '[${log.formattedTimestamp}] ${log.message}').join('\n');
+    if (_selected.isEmpty) return;
+    final indices = _selected.where((i) => i >= 0 && i < _logs.length).toList()
+      ..sort();
+    if (indices.isEmpty) return;
+    final text = indices
+        .map((i) => '[${_logs[i].formattedTimestamp}] ${_logs[i].message}')
+        .join('\n');
     Clipboard.setData(ClipboardData(text: text));
+  }
+
+  /// 命中测试：把全局指针坐标映射到日志行下标；命中空白处返回 null。
+  int? _indexAtPosition(Offset globalPos) {
+    final box = _listKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    final local = box.globalToLocal(globalPos);
+    final result = BoxHitTestResult();
+    if (!box.hitTest(result, position: local)) return null;
+    for (final entry in result.path) {
+      final target = entry.target;
+      if (target is RenderMetaData) {
+        final meta = target.metaData;
+        if (meta is int) return meta;
+      }
+    }
+    return null;
+  }
+
+  bool get _isMultiSelectModifierPressed =>
+      HardwareKeyboard.instance.isControlPressed ||
+      HardwareKeyboard.instance.isMetaPressed;
+
+  void _onPointerDown(PointerDownEvent e) {
+    // 仅处理鼠标左键
+    if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryMouseButton) {
+      return;
+    }
+    final idx = _indexAtPosition(e.position);
+    if (idx == null) {
+      // 点空白：取消选中，不进入拖拽
+      _clearSelection();
+      return;
+    }
+    if (_isMultiSelectModifierPressed) {
+      // Ctrl/Cmd+左键：切换单行，不启动拖拽框选
+      setState(() {
+        if (!_selected.add(idx)) _selected.remove(idx);
+      });
+      _dragAnchor = null;
+    } else {
+      // 普通左键按下：起一个新的框选，锚定当前行
+      setState(() {
+        _selected
+          ..clear()
+          ..add(idx);
+      });
+      _dragAnchor = idx;
+    }
+  }
+
+  void _onPointerMove(PointerMoveEvent e) {
+    if (_dragAnchor == null) return;
+    final idx = _indexAtPosition(e.position);
+    if (idx == null) return;
+    final lo = min(_dragAnchor!, idx);
+    final hi = max(_dragAnchor!, idx);
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(List.generate(hi - lo + 1, (i) => lo + i));
+    });
+  }
+
+  void _onPointerUp(PointerUpEvent e) {
+    _dragAnchor = null;
   }
 
   void handleTrayAction(String action) {
@@ -273,10 +382,10 @@ class HomePageState extends State<HomePage> {
     if (Platform.isMacOS) {
       final service = _service as dynamic;
       await service.forceCleanup();
-    } else if(Platform.isWindows){
+    } else if (Platform.isWindows) {
       final service = _service as dynamic;
       await service.forceCleanup();
-    }else {
+    } else {
       _service.stop();
     }
   }
@@ -285,22 +394,53 @@ class HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Shortcuts(
       shortcuts: {
-        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyR): StartIntent(),
-        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyS): StopIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyR):
+            StartIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyS):
+            StopIntent(),
         // 全选 / 复制 / 取消选中：macOS 用 Cmd，Windows/Linux 用 Ctrl
-        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyA): SelectAllLogsIntent(),
-        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyA): SelectAllLogsIntent(),
-        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyC): CopyLogsIntent(),
-        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyC): CopyLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyA):
+            SelectAllLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyA):
+            SelectAllLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyC):
+            CopyLogsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyC):
+            CopyLogsIntent(),
         LogicalKeySet(LogicalKeyboardKey.escape): ClearSelectionIntent(),
       },
       child: Actions(
         actions: {
-          StartIntent: CallbackAction<StartIntent>(onInvoke: (_) { if (!_isRunning) _start(); return null; }),
-          StopIntent: CallbackAction<StopIntent>(onInvoke: (_) { if (_isRunning) _stop(); return null; }),
-          SelectAllLogsIntent: CallbackAction<SelectAllLogsIntent>(onInvoke: (_) { _selectAllLogs(); return null; }),
-          CopyLogsIntent: CallbackAction<CopyLogsIntent>(onInvoke: (_) { _copySelectedLogs(); return null; }),
-          ClearSelectionIntent: CallbackAction<ClearSelectionIntent>(onInvoke: (_) { _clearSelection(); return null; }),
+          StartIntent: CallbackAction<StartIntent>(
+            onInvoke: (_) {
+              if (!_isRunning) _start();
+              return null;
+            },
+          ),
+          StopIntent: CallbackAction<StopIntent>(
+            onInvoke: (_) {
+              if (_isRunning) _stop();
+              return null;
+            },
+          ),
+          SelectAllLogsIntent: CallbackAction<SelectAllLogsIntent>(
+            onInvoke: (_) {
+              _selectAllLogs();
+              return null;
+            },
+          ),
+          CopyLogsIntent: CallbackAction<CopyLogsIntent>(
+            onInvoke: (_) {
+              _copySelectedLogs();
+              return null;
+            },
+          ),
+          ClearSelectionIntent: CallbackAction<ClearSelectionIntent>(
+            onInvoke: (_) {
+              _clearSelection();
+              return null;
+            },
+          ),
         },
         child: Focus(
           autofocus: true,
@@ -326,7 +466,11 @@ class HomePageState extends State<HomePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.mic, size: 32, color: Theme.of(context).colorScheme.primary),
+              Icon(
+                Icons.mic,
+                size: 32,
+                color: Theme.of(context).colorScheme.primary,
+              ),
               const SizedBox(width: 12),
               Text(
                 '语音助手控制中心',
@@ -341,7 +485,8 @@ class HomePageState extends State<HomePage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 8, height: 8,
+                width: 8,
+                height: 8,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: _isRunning ? const Color(0xFF4CAF50) : Colors.grey,
@@ -395,9 +540,16 @@ class HomePageState extends State<HomePage> {
           const SizedBox(width: 16),
           OutlinedButton.icon(
             onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => SpeakerManagePage(onLog: (msg) {
-                _service.addLog(msg);
-              })));
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SpeakerManagePage(
+                    onLog: (msg) {
+                      _service.addLog(msg);
+                    },
+                  ),
+                ),
+              );
             },
             icon: const Icon(Icons.person),
             label: const Text('声纹管理'),
@@ -438,28 +590,61 @@ class HomePageState extends State<HomePage> {
                       style: TextStyle(color: Colors.grey.shade600),
                     ),
                   )
-                : GestureDetector(
-                    // 点击控制台空白处取消「全选」高亮
-                    onTap: _clearSelection,
-                    behavior: HitTestBehavior.opaque,
-                    child: ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _logs.length,
-                      itemBuilder: (context, index) {
-                        final log = _logs[index];
-                        return Container(
-                          color: _allSelected ? const Color(0x553B82F6) : null,
-                          child: Text(
-                            '[${log.formattedTimestamp}] ${log.message}',
-                            style: const TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              color: Color(0xFFE0E0E0),
-                            ),
-                          ),
-                        );
-                      },
+                : Listener(
+                    // Ctrl/Cmd+左键点选、左键拖拽框选，都在这里统一接管指针事件
+                    onPointerDown: _onPointerDown,
+                    onPointerMove: _onPointerMove,
+                    onPointerUp: _onPointerUp,
+                    child: ScrollbarTheme(
+                      // 深色背景下默认滚动条几乎不可见，这里显式给出可见的粗细/颜色/常驻轨道
+                      data: ScrollbarThemeData(
+                        thumbVisibility: WidgetStateProperty.all(true),
+                        trackVisibility: WidgetStateProperty.all(true),
+                        thickness: WidgetStateProperty.all(8),
+                        radius: const Radius.circular(4),
+                        thumbColor: WidgetStateProperty.all(
+                          const Color(0xFF6B6B6B),
+                        ),
+                        trackColor: WidgetStateProperty.all(
+                          const Color(0xFF2A2A2A),
+                        ),
+                        trackBorderColor: WidgetStateProperty.all(
+                          Colors.transparent,
+                        ),
+                      ),
+                      child: Scrollbar(
+                        controller: _scrollController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        child: ListView.builder(
+                          key: _listKey,
+                          controller: _scrollController,
+                          // 右侧留出滚动条宽度，避免轨道压住日志文本或被圆角边框裁掉
+                          padding: const EdgeInsets.fromLTRB(16, 16, 20, 16),
+                          itemCount: _logs.length,
+                          itemBuilder: (context, index) {
+                            final log = _logs[index];
+                            // MetaData 携带行下标，供 _indexAtPosition 命中测试识别行
+                            return MetaData(
+                              metaData: index,
+                              behavior: HitTestBehavior.opaque,
+                              child: Container(
+                                color: _selected.contains(index)
+                                    ? const Color(0x553B82F6)
+                                    : null,
+                                child: Text(
+                                  '[${log.formattedTimestamp}] ${log.message}',
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 12,
+                                    color: Color(0xFFE0E0E0),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
                   ),
           ),
@@ -470,7 +655,11 @@ class HomePageState extends State<HomePage> {
 }
 
 class StartIntent extends Intent {}
+
 class StopIntent extends Intent {}
+
 class SelectAllLogsIntent extends Intent {}
+
 class CopyLogsIntent extends Intent {}
+
 class ClearSelectionIntent extends Intent {}

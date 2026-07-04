@@ -47,6 +47,11 @@ msix_config:
 # The following section is specific to Flutter packages.
 flutter:
 
+  # 关闭实验性的 Swift Package Manager 集成：本项目走 CocoaPods，
+  # 开启 SPM 会尝试解析不存在的 ephemeral/.../FlutterFramework 包导致构建失败。
+  config:
+    enable-swift-package-manager: false
+
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

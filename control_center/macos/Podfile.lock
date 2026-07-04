@@ -31,8 +31,8 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   flutter_local_notifications: 7e5a17a1dbc00d83dc10d43c2c4c05f2ceed233c
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  screen_retriever_macos: 452e51764a9e1cdb74b3c541238795849f21557f
-  tray_manager: a104b5c81b578d83f3c3d0f40a997c8b10810166
+  screen_retriever_macos: c5508cc3c66ff0d4db650480cf0ab691e220d933
+  tray_manager: 19c369010e59c073f13b82354d78a35f7972d609
   window_manager: 1d01fa7ac65a6e6f83b965471b1a7fdd3f06166c
 
 PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009

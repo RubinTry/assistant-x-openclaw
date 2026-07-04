@@ -1,6 +1,6 @@
 {
     "engine_comment": "主脑引擎，可选值：openclaw（默认）、hermes",
-    "engine": "openclaw",
+    "engine": "hermes",
     "default": "jarvis",
     "overlay_debug_mode": false,
     "dock_autohide_on_wake_comment": "true 时助手激活期自动隐藏系统 Dock，退回待机还原（仅 macOS）",
