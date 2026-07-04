@@ -36,76 +36,11 @@ API_PORT = 18790
 
 
 class _ExitAPIHandler(BaseHTTPRequestHandler):
-    def _read_json_body(self):
-        """读取并解析请求体 JSON；失败返回 None。"""
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except (TypeError, ValueError):
-            length = 0
-        if length <= 0:
-            return {}
-        try:
-            raw = self.rfile.read(length)
-            return json.loads(raw.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            return None
-
-    def _send_json(self, code, obj):
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
     def do_POST(self):
         global _dnd_mode
-        # ── 模型表写入（仅本地回环；Control Center 传明文，后端加密落盘）──
-        if self.path.startswith("/models"):
-            import model_store
-            body = self._read_json_body()
-            if body is None:
-                self._send_json(400, {"error": "invalid json body"})
-                return
-            try:
-                if self.path == "/models/validate":
-                    # 存表前的能力探针：不支持工具调用的快模型会拦下（升级路径靠 tool call）。
-                    # 入参二选一：{id} 校验已存条目（解密密文）| 完整明文条目校验未保存的新条目。
-                    import model_probe
-                    entry_id = (body.get("id") or "").strip()
-                    if entry_id:
-                        dec = model_store.get_decrypted(entry_id)
-                        if dec is None:
-                            self._send_json(404, {"error": f"模型 {entry_id} 不存在或解密失败"})
-                            return
-                        base_url, model, api_key = dec["base_url"], dec["model"], dec["api_key"]
-                    else:
-                        base_url = (body.get("base_url") or "").strip()
-                        model = (body.get("model") or "").strip()
-                        api_key = body.get("api_key") or ""
-                        if not base_url or not model or not api_key:
-                            self._send_json(400, {"error": "校验需要 base_url、model、api_key（或已存条目的 id）"})
-                            return
-                    result = model_probe.probe_model(base_url, model, api_key)
-                    self._send_json(200, {"status": "ok", "result": result})
-                elif self.path == "/models" or self.path == "/models/upsert":
-                    entry = model_store.upsert_model(body)
-                    self._send_json(200, {"status": "ok", "entry": entry})
-                elif self.path == "/models/delete":
-                    result = model_store.delete_model((body.get("id") or "").strip())
-                    self._send_json(200, {"status": "ok", **result})
-                elif self.path == "/models/current":
-                    result = model_store.set_current((body.get("id") or "").strip())
-                    self._send_json(200, {"status": "ok", **result})
-                else:
-                    self._send_json(404, {"error": "unknown models route"})
-            except KeyError as e:
-                self._send_json(404, {"error": str(e)})
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-            except Exception as e:  # noqa: BLE001 — 端点兜底，避免 500 裸崩
-                self._send_json(500, {"error": f"model store failed: {e}"})
-            return
+        # 注：模型表读写不在此 HTTP server 上——它只在助手启动时监听，而模型配置
+        # 需在启动前就能做。改由 Control Center 直接调 venv 子进程 scripts/model_cli.py
+        # 读写 model_table.json（助手运行时每轮读文件，配置改动自动生效）。
         if self.path == "/exit":
             if _assistant_instance is not None:
                 threading.Thread(
@@ -137,14 +72,6 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
-        # 模型表读取（api_key 掩码，绝不回明文）——供 Control Center 展示
-        if self.path == "/models" or self.path.startswith("/models?"):
-            import model_store
-            try:
-                self._send_json(200, model_store.list_models())
-            except Exception as e:  # noqa: BLE001
-                self._send_json(500, {"error": f"model store failed: {e}"})
-            return
         # 摄像头抓帧：抓一帧 JPEG 直接回给调用方（Hermes 用 curl -o 落地后交 vision_analyze）
         if self.path.startswith("/camera/snapshot"):
             import tempfile
