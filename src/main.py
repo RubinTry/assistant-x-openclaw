@@ -68,7 +68,27 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "invalid json body"})
                 return
             try:
-                if self.path == "/models" or self.path == "/models/upsert":
+                if self.path == "/models/validate":
+                    # 存表前的能力探针：不支持工具调用的快模型会拦下（升级路径靠 tool call）。
+                    # 入参二选一：{id} 校验已存条目（解密密文）| 完整明文条目校验未保存的新条目。
+                    import model_probe
+                    entry_id = (body.get("id") or "").strip()
+                    if entry_id:
+                        dec = model_store.get_decrypted(entry_id)
+                        if dec is None:
+                            self._send_json(404, {"error": f"模型 {entry_id} 不存在或解密失败"})
+                            return
+                        base_url, model, api_key = dec["base_url"], dec["model"], dec["api_key"]
+                    else:
+                        base_url = (body.get("base_url") or "").strip()
+                        model = (body.get("model") or "").strip()
+                        api_key = body.get("api_key") or ""
+                        if not base_url or not model or not api_key:
+                            self._send_json(400, {"error": "校验需要 base_url、model、api_key（或已存条目的 id）"})
+                            return
+                    result = model_probe.probe_model(base_url, model, api_key)
+                    self._send_json(200, {"status": "ok", "result": result})
+                elif self.path == "/models" or self.path == "/models/upsert":
                     entry = model_store.upsert_model(body)
                     self._send_json(200, {"status": "ok", "entry": entry})
                 elif self.path == "/models/delete":

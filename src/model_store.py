@@ -279,6 +279,31 @@ def get_current_decrypted() -> dict | None:
         }
 
 
+def get_decrypted(entry_id: str) -> dict | None:
+    """进程内使用：按 id 返回条目并解出明文 api_key（供校验探针 / LLM 调用）。
+
+    返回 {id,label,provider,base_url,model,api_key} 或 None（不存在/解密失败）。
+    与 get_current_decrypted 同为明文出口，仅进程内使用，绝不经端点回传。
+    """
+    with _lock:
+        data = _load()
+        entry = next((e for e in data["models"] if e.get("id") == entry_id), None)
+        if entry is None:
+            return None
+        try:
+            api_key = _decrypt(entry.get("api_key_enc", ""))
+        except (InvalidToken, ValueError, TypeError):
+            return None
+        return {
+            "id": entry.get("id"),
+            "label": entry.get("label"),
+            "provider": entry.get("provider"),
+            "base_url": entry.get("base_url"),
+            "model": entry.get("model"),
+            "api_key": api_key,
+        }
+
+
 def _slug(text: str) -> str:
     keep = []
     for ch in text.lower().strip():
