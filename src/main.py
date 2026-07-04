@@ -36,8 +36,56 @@ API_PORT = 18790
 
 
 class _ExitAPIHandler(BaseHTTPRequestHandler):
+    def _read_json_body(self):
+        """读取并解析请求体 JSON；失败返回 None。"""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length <= 0:
+            return {}
+        try:
+            raw = self.rfile.read(length)
+            return json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return None
+
+    def _send_json(self, code, obj):
+        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         global _dnd_mode
+        # ── 模型表写入（仅本地回环；Control Center 传明文，后端加密落盘）──
+        if self.path.startswith("/models"):
+            import model_store
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid json body"})
+                return
+            try:
+                if self.path == "/models" or self.path == "/models/upsert":
+                    entry = model_store.upsert_model(body)
+                    self._send_json(200, {"status": "ok", "entry": entry})
+                elif self.path == "/models/delete":
+                    result = model_store.delete_model((body.get("id") or "").strip())
+                    self._send_json(200, {"status": "ok", **result})
+                elif self.path == "/models/current":
+                    result = model_store.set_current((body.get("id") or "").strip())
+                    self._send_json(200, {"status": "ok", **result})
+                else:
+                    self._send_json(404, {"error": "unknown models route"})
+            except KeyError as e:
+                self._send_json(404, {"error": str(e)})
+            except ValueError as e:
+                self._send_json(400, {"error": str(e)})
+            except Exception as e:  # noqa: BLE001 — 端点兜底，避免 500 裸崩
+                self._send_json(500, {"error": f"model store failed: {e}"})
+            return
         if self.path == "/exit":
             if _assistant_instance is not None:
                 threading.Thread(
@@ -69,6 +117,14 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
+        # 模型表读取（api_key 掩码，绝不回明文）——供 Control Center 展示
+        if self.path == "/models" or self.path.startswith("/models?"):
+            import model_store
+            try:
+                self._send_json(200, model_store.list_models())
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"error": f"model store failed: {e}"})
+            return
         # 摄像头抓帧：抓一帧 JPEG 直接回给调用方（Hermes 用 curl -o 落地后交 vision_analyze）
         if self.path.startswith("/camera/snapshot"):
             import tempfile

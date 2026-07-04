@@ -141,3 +141,7 @@ assistant_overlay/assets/ironman/*.png
 # Hermes 多角色网关运行时 pid（方案 B）
 .hermes_gateways.pids
 .DS_Store
+
+# 模型表与其加密 master key（含加密后的 api_key，机器相关，不入库）
+model_table.json
+data/.model_key
