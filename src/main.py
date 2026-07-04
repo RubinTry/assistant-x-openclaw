@@ -1162,6 +1162,18 @@ class VoiceAssistant:
         self.openclaw = get_bridge(agent_id=agent_id, namespace=agent_id)
         self.openclaw.precheck_async()
 
+        # 快路径（分流第一线）：直连 Control Center 配置的快模型。
+        # 未配置模型表时 is_available()=False，_route_stream 自动全走 agent，零行为变化。
+        try:
+            from fast_path import FastPathClient
+            self._fast_path = FastPathClient(
+                should_stop=self._stop_openclaw_request.is_set,
+                agent_name=self.current_cfg.get("name") or assistant_id,
+            )
+        except Exception as e:  # noqa: BLE001 — 快路径不可用绝不能拖垮桥初始化
+            print(f"[分流] 快路径初始化失败（忽略，全走 agent）: {e}")
+            self._fast_path = None
+
     def _detect_assistant_from_keyword(self, keyword_result: str) -> str:
         """从唤醒词检测结果识别是哪个 assistant"""
         if not keyword_result:
@@ -2124,6 +2136,38 @@ class VoiceAssistant:
         except Exception as e:
             print(f"[OpenClaw] 发送 /clear 失败: {e}")
 
+    def _route_stream(self, text, on_chunk=None, on_start=None, on_end=None):
+        """分流：快模型第一线，重消息 tool call 升级到 agent。
+
+        与桥 send_and_wait_stream 同签名/同回调契约——TTS 流水线、等待音、结果处理
+        全部复用，两条路对上层完全透明。未配置快模型 / 明确重意图 / 快路径失败，
+        一律走 agent 兜底（fail-open）。
+        """
+        import routing
+        fp = getattr(self, "_fast_path", None)
+        use_fast = (
+            fp is not None
+            and fp.is_available()
+            and not routing.is_obviously_heavy(text)
+        )
+        if use_fast:
+            try:
+                from fast_path import AgentHandoff
+                return fp.send_and_wait_stream(
+                    text, on_chunk=on_chunk, on_start=on_start, on_end=on_end,
+                )
+            except AgentHandoff as h:
+                print(f"[分流] 升级 agent（{h.reason}）: {h.task[:50]}")
+                text = h.task or text  # 用模型清洗过的任务文本（兜底原文）
+        else:
+            reason = "无快模型" if (fp is None or not fp.is_available()) else "硬闸命中"
+            print(f"[分流] 直连 agent（{reason}）")
+
+        # 重路径：agent 桥（openclaw / hermes），保持原有行为不变
+        return self.openclaw.send_and_wait_stream(
+            text, on_chunk=on_chunk, on_start=on_start, on_end=on_end,
+        )
+
     def _on_recognized(self, text: str):
         """识别结果 → 发送给 OpenClaw → 整体合成播报回复"""
         print(f"\n[→ OpenClaw] {text}")
@@ -2313,7 +2357,7 @@ class VoiceAssistant:
                         self._waiting_active.clear()
 
                 try:
-                    reply = self.openclaw.send_and_wait_stream(
+                    reply = self._route_stream(
                         text,
                         on_chunk=_on_stream_chunk,
                         on_start=_on_stream_start,
@@ -2426,6 +2470,10 @@ class VoiceAssistant:
         self.continuous_mode = False
         self._verified_speaker_name = None
         self._conv_audio_buffer.clear()
+        # 退下时清空快路径滚动上下文，避免下次唤醒串上一次的追问语境
+        _fp = getattr(self, "_fast_path", None)
+        if _fp is not None:
+            _fp.reset()
         play_prebuilt_voice("exit", _random_exit_line())
         while is_tts_playing():
             time.sleep(0.05)
