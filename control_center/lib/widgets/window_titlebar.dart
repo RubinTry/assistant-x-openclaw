@@ -13,8 +13,6 @@ class WindowTitleBar extends StatelessWidget {
   const WindowTitleBar({super.key});
 
   static const double height = 36;
-  // macOS 原生红绿灯占据左上角，品牌条左侧需让位
-  static const double _macTrafficLightInset = 78;
 
   @override
   Widget build(BuildContext context) {
@@ -22,29 +20,46 @@ class WindowTitleBar extends StatelessWidget {
     return SizedBox(
       height: height,
       child: Container(
-        color: AppColors.bg,
+        decoration: BoxDecoration(
+          color: AppColors.bg.withValues(alpha: 0.88),
+          border: Border(
+            bottom: BorderSide(color: AppColors.accent.withValues(alpha: 0.18)),
+          ),
+        ),
         child: Row(
           children: [
-            SizedBox(width: isMac ? _macTrafficLightInset : 12),
             // 品牌 + 拖拽区
             Expanded(
               child: MoveWindow(
-                child: Row(
-                  children: [
-                    if (!isMac) ...[
-                      const Icon(Icons.mic, size: 14, color: AppColors.accent),
-                      const SizedBox(width: 8),
-                    ],
-                    Text(
-                      '语音助手控制中心',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.2,
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 70,
+                        height: 1,
+                        color: AppColors.accent.withValues(alpha: 0.38),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 10),
+                      const ReactorMark(size: 20, icon: Icons.graphic_eq),
+                      const SizedBox(width: 9),
+                      const Text(
+                        'ASSISTANT CONTROL CENTER',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                            decoration:TextDecoration.none
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Container(
+                        width: 70,
+                        height: 1,
+                        color: AppColors.accent.withValues(alpha: 0.38),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

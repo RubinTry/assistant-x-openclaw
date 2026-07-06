@@ -462,82 +462,190 @@ class HomePageState extends State<HomePage> {
   /// 顶栏：左侧品牌 + 运行状态胶囊；右侧启动/停止 + 管理页入口。
   Widget _buildTopBar() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+      child: Column(
         children: [
-          // 品牌区
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: AppColors.accent.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.mic, size: 20, color: AppColors.accent),
-          ),
-          const SizedBox(width: 12),
-          const Text(
-            '语音助手控制中心',
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(width: 12),
-          StatusPill(active: _isRunning),
-          const Spacer(),
-          // 主操作：启动 / 停止（一次只亮一个，避免红绿双雄并立）
-          if (!_isRunning)
-            FilledButton.icon(
-              onPressed: _start,
-              icon: const Icon(Icons.play_arrow, size: 18),
-              label: const Text('启动'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.success,
-                foregroundColor: const Color(0xFF06281A),
+          Row(
+            children: [
+              const ReactorMark(size: 46, icon: Icons.mic),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '语音助手控制中心',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Voice runtime, identity gate, and fast-path model routing',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            )
-          else
-            FilledButton.icon(
-              onPressed: _stop,
-              icon: const Icon(Icons.stop, size: 18),
-              label: const Text('停止'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.danger.withValues(alpha: 0.16),
-                foregroundColor: AppColors.danger,
-              ),
-            ),
-          const SizedBox(width: 12),
-          Container(width: 1, height: 24, color: AppColors.border),
-          const SizedBox(width: 12),
-          // 管理入口
-          OutlinedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SpeakerManagePage(
-                    onLog: (msg) {
-                      _service.addLog(msg);
-                    },
+              const SizedBox(width: 12),
+              StatusPill(active: _isRunning),
+              const SizedBox(width: 14),
+              if (!_isRunning)
+                FilledButton.icon(
+                  onPressed: _start,
+                  icon: const Icon(Icons.play_arrow, size: 18),
+                  label: const Text('启动'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: const Color(0xFF021018),
+                  ),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: _stop,
+                  icon: const Icon(Icons.stop, size: 18),
+                  label: const Text('停止'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.danger.withValues(alpha: 0.16),
+                    foregroundColor: AppColors.danger,
+                    side: BorderSide(
+                      color: AppColors.danger.withValues(alpha: 0.45),
+                    ),
                   ),
                 ),
-              );
-            },
-            icon: const Icon(Icons.person_outline, size: 18),
-            label: const Text('声纹管理'),
+              const SizedBox(width: 10),
+              _topNavButton(
+                icon: Icons.person_outline,
+                label: '声纹',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SpeakerManagePage(
+                        onLog: (msg) {
+                          _service.addLog(msg);
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+              _topNavButton(
+                icon: Icons.memory_outlined,
+                label: '模型',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ModelManagePage()),
+                  );
+                },
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          OutlinedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ModelManagePage()),
-              );
-            },
-            icon: const Icon(Icons.bolt_outlined, size: 18),
-            label: const Text('模型管理'),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _statusModule(
+                  Icons.power_settings_new,
+                  '核心状态',
+                  _isRunning ? '助手在线，正在监听唤醒链路' : '待机中，点击启动接管语音链路',
+                  _isRunning ? AppColors.success : AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _statusModule(
+                  Icons.terminal,
+                  '控制台',
+                  '${_logs.length} 行输出，支持拖拽选择与复制',
+                  AppColors.accent,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _statusModule(
+                  Icons.bolt_outlined,
+                  '快路径',
+                  '轻消息直答，重任务升级主脑',
+                  AppColors.warning,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _topNavButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+    );
+  }
+
+  Widget _statusModule(IconData icon, String label, String value, Color color) {
+    return Container(
+      height: 72,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceGlass,
+        borderRadius: AppShape.borderRadius,
+        border: Border.all(color: color.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: color.withValues(alpha: 0.24)),
+            ),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -576,24 +684,29 @@ class HomePageState extends State<HomePage> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: const BoxDecoration(
               color: AppColors.surfaceHigh,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(AppShape.radius)),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(AppShape.radius),
+              ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.terminal, size: 14, color: AppColors.textMuted),
+                const Icon(Icons.terminal, size: 14, color: AppColors.accent),
                 const SizedBox(width: 8),
                 const Text(
-                  '控制台输出',
+                  '运行控制台',
                   style: TextStyle(
-                    color: AppColors.textSecondary,
+                    color: AppColors.textPrimary,
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const Spacer(),
                 Text(
                   '${_logs.length} 行',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 _consoleAction(Icons.clear_all, '清空', _clearConsole),
@@ -605,7 +718,7 @@ class HomePageState extends State<HomePage> {
             child: _logs.isEmpty
                 ? const Center(
                     child: Text(
-                      '暂无日志输出',
+                      '等待语音助手输出',
                       style: TextStyle(color: AppColors.textMuted),
                     ),
                   )
@@ -622,10 +735,10 @@ class HomePageState extends State<HomePage> {
                         thickness: WidgetStateProperty.all(8),
                         radius: const Radius.circular(4),
                         thumbColor: WidgetStateProperty.all(
-                          const Color(0xFF6B6B6B),
+                          AppColors.borderBright,
                         ),
                         trackColor: WidgetStateProperty.all(
-                          const Color(0xFF2A2A2A),
+                          AppColors.surfaceHigh,
                         ),
                         trackBorderColor: WidgetStateProperty.all(
                           Colors.transparent,

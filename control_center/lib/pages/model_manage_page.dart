@@ -87,11 +87,12 @@ class _ModelManagePageState extends State<ModelManagePage> {
     }
   }
 
-  Future<void> _openEditor({ModelEntry? entry}) async {
+  Future<void> _openEditor({ModelEntry? entry, bool clone = false}) async {
     final saved = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _ModelEditorDialog(service: _service, entry: entry),
+      builder: (_) =>
+          _ModelEditorDialog(service: _service, entry: entry, clone: clone),
     );
     if (saved == true) await _reload();
   }
@@ -105,7 +106,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('快路径模型'),
+        title: const Text('模型路由'),
         actions: [
           IconButton(
             tooltip: '刷新',
@@ -118,7 +119,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openEditor(),
         backgroundColor: AppColors.accent,
-        foregroundColor: const Color(0xFF07231F),
+        foregroundColor: const Color(0xFF021018),
         icon: const Icon(Icons.add),
         label: const Text('添加模型'),
       ),
@@ -151,12 +152,12 @@ class _ModelManagePageState extends State<ModelManagePage> {
     final current = _table?.current;
     return Column(
       children: [
-        _buildInfoBar(),
+        _buildInfoBar(models.length),
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 96),
             itemCount: models.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (_, i) =>
                 _buildTile(models[i], models[i].id == current),
           ),
@@ -166,24 +167,75 @@ class _ModelManagePageState extends State<ModelManagePage> {
   }
 
   /// 顶部说明条：解释「使用中」的含义。
-  Widget _buildInfoBar() {
+  Widget _buildInfoBar(int modelCount) {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: AppColors.accent.withValues(alpha: 0.08),
+        color: AppColors.surfaceGlass,
         borderRadius: AppShape.borderRadius,
-        border: Border.all(color: AppColors.accent.withValues(alpha: 0.22)),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.28)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.info_outline, size: 16, color: AppColors.accent),
+          const ReactorMark(size: 34, icon: Icons.memory_outlined),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '快路径模型路由',
+                  style: TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  '使用中的模型负责第一线分流：轻消息直答，重任务通过工具调用升级主脑。',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          _miniStat('模型数', '$modelCount'),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '「使用中」的模型作为分流快路径的第一线：轻消息直接回答，重消息经工具调用转交主脑。',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          _miniStat('校验', '必需'),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniStat(String label, String value) {
+    return Container(
+      width: 72,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.bg.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.accentSoft,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],
@@ -194,7 +246,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
   Widget _buildTile(ModelEntry e, bool isCurrent) {
     return Panel(
       borderColor: isCurrent ? AppColors.accent : AppColors.border,
-      borderWidth: isCurrent ? 1.5 : 1,
+      borderWidth: isCurrent ? 1.6 : 1,
       child: InkWell(
         borderRadius: AppShape.borderRadius,
         onTap: isCurrent ? null : () => _setCurrent(e.id),
@@ -206,12 +258,22 @@ class _ModelManagePageState extends State<ModelManagePage> {
               // 单选指示
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Icon(
-                  isCurrent
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  size: 20,
-                  color: isCurrent ? AppColors.accent : AppColors.textMuted,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: (isCurrent ? AppColors.accent : AppColors.textMuted)
+                        .withValues(alpha: 0.1),
+                    border: Border.all(
+                      color: isCurrent ? AppColors.accent : AppColors.border,
+                    ),
+                  ),
+                  child: Icon(
+                    isCurrent ? Icons.check : Icons.circle_outlined,
+                    size: 15,
+                    color: isCurrent ? AppColors.accent : AppColors.textMuted,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -239,14 +301,20 @@ class _ModelManagePageState extends State<ModelManagePage> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    _metaRow(Icons.dns_outlined,
-                        '${e.provider.isEmpty ? "—" : e.provider} · ${e.model}'),
+                    _metaRow(
+                      Icons.dns_outlined,
+                      '${e.provider.isEmpty ? "—" : e.provider} · ${e.model}',
+                    ),
                     const SizedBox(height: 3),
                     _metaRow(Icons.link, e.baseUrl),
                     const SizedBox(height: 3),
                     _metaRow(
-                      Icons.key_outlined,
-                      e.apiKeySet ? e.apiKeyMasked : '未设置',
+                      e.provider.toLowerCase() == 'openai-codex'
+                          ? Icons.login
+                          : Icons.key_outlined,
+                      e.provider.toLowerCase() == 'openai-codex'
+                          ? '使用本机 Codex 登录态'
+                          : (e.apiKeySet ? e.apiKeyMasked : '未设置'),
                     ),
                   ],
                 ),
@@ -260,6 +328,13 @@ class _ModelManagePageState extends State<ModelManagePage> {
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     color: AppColors.textSecondary,
                     onPressed: () => _openEditor(entry: e),
+                  ),
+                  IconButton(
+                    tooltip: '克隆',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.copy_all_outlined, size: 18),
+                    color: AppColors.accent,
+                    onPressed: () => _openEditor(entry: e, clone: true),
                   ),
                   IconButton(
                     tooltip: '删除',
@@ -362,11 +437,125 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// OpenAI-compatible provider presets.
+///
+/// The fast path always validates through the OpenAI Chat Completions shape, so
+/// native non-compatible APIs are intentionally represented through compatible
+/// gateways such as OpenRouter instead of their native endpoints.
+class _ModelPreset {
+  final String title;
+  final String subtitle;
+  final String label;
+  final String provider;
+  final String baseUrl;
+  final String model;
+  final IconData icon;
+
+  const _ModelPreset({
+    required this.title,
+    required this.subtitle,
+    required this.label,
+    required this.provider,
+    required this.baseUrl,
+    required this.model,
+    required this.icon,
+  });
+}
+
+const _modelPresets = [
+  _ModelPreset(
+    title: 'OpenAI Codex',
+    subtitle: 'Codex login',
+    label: 'OpenAI Codex',
+    provider: 'openai-codex',
+    baseUrl: 'codex://local',
+    model: 'gpt-5.4-mini',
+    icon: Icons.terminal,
+  ),
+  _ModelPreset(
+    title: 'OpenAI',
+    subtitle: 'GPT-4.1 mini',
+    label: 'OpenAI GPT-4.1 mini',
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4.1-mini',
+    icon: Icons.auto_awesome,
+  ),
+  _ModelPreset(
+    title: 'DeepSeek',
+    subtitle: 'deepseek-chat',
+    label: 'DeepSeek Chat',
+    provider: 'deepseek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    icon: Icons.bolt_outlined,
+  ),
+  _ModelPreset(
+    title: 'Gemini',
+    subtitle: 'OpenAI endpoint',
+    label: 'Gemini 2.5 Flash',
+    provider: 'gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: 'gemini-2.5-flash',
+    icon: Icons.diamond_outlined,
+  ),
+  _ModelPreset(
+    title: 'Grok',
+    subtitle: 'xAI',
+    label: 'Grok 3 Mini',
+    provider: 'grok',
+    baseUrl: 'https://api.x.ai/v1',
+    model: 'grok-3-mini',
+    icon: Icons.public,
+  ),
+  _ModelPreset(
+    title: 'Anthropic',
+    subtitle: 'via OpenRouter',
+    label: 'Claude Sonnet (OpenRouter)',
+    provider: 'anthropic',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'anthropic/claude-sonnet-4',
+    icon: Icons.psychology_alt_outlined,
+  ),
+  _ModelPreset(
+    title: 'OpenRouter',
+    subtitle: 'model router',
+    label: 'OpenRouter Auto',
+    provider: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'openrouter/auto',
+    icon: Icons.hub_outlined,
+  ),
+  _ModelPreset(
+    title: 'Ollama',
+    subtitle: 'local',
+    label: 'Ollama Local',
+    provider: 'ollama',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'qwen3:latest',
+    icon: Icons.memory_outlined,
+  ),
+  _ModelPreset(
+    title: 'LM Studio',
+    subtitle: 'local',
+    label: 'LM Studio Local',
+    provider: 'lmstudio',
+    baseUrl: 'http://127.0.0.1:1234/v1',
+    model: 'local-model',
+    icon: Icons.computer_outlined,
+  ),
+];
+
 /// 新增/编辑弹窗：填表 → 校验并保存（校验不过不落表）。
 class _ModelEditorDialog extends StatefulWidget {
   final ModelService service;
   final ModelEntry? entry;
-  const _ModelEditorDialog({required this.service, this.entry});
+  final bool clone;
+  const _ModelEditorDialog({
+    required this.service,
+    this.entry,
+    this.clone = false,
+  });
 
   @override
   State<_ModelEditorDialog> createState() => _ModelEditorDialogState();
@@ -383,13 +572,18 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
   ProbeResult? _probe;
   String? _formError;
 
-  bool get _isEdit => widget.entry != null;
+  bool get _isClone => widget.clone && widget.entry != null;
+  bool get _isEdit => widget.entry != null && !_isClone;
+  bool get _isCodexProvider =>
+      _provider.text.trim().toLowerCase() == 'openai-codex';
 
   @override
   void initState() {
     super.initState();
     final e = widget.entry;
-    _label = TextEditingController(text: e?.label ?? '');
+    _label = TextEditingController(
+      text: _isClone && e != null ? '${e.label} 副本' : e?.label ?? '',
+    );
     _provider = TextEditingController(text: e?.provider ?? '');
     _baseUrl = TextEditingController(text: e?.baseUrl ?? '');
     _model = TextEditingController(text: e?.model ?? '');
@@ -411,9 +605,25 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
       return 'Base URL 必填（OpenAI 标准，如 https://api.deepseek.com/v1）';
     }
     if (_model.text.trim().isEmpty) return 'Model 必填';
-    // 新增必须有 key；编辑留空表示保持原 key
-    if (!_isEdit && _apiKey.text.trim().isEmpty) return '新增模型必须填 API Key';
+    // 新增必须有 key；克隆/编辑留空表示沿用原 key。
+    if (!_isEdit &&
+        !_isClone &&
+        !_isCodexProvider &&
+        _apiKey.text.trim().isEmpty) {
+      return '新增模型必须填 API Key';
+    }
     return null;
+  }
+
+  void _applyPreset(_ModelPreset preset) {
+    setState(() {
+      _label.text = preset.label;
+      _provider.text = preset.provider;
+      _baseUrl.text = preset.baseUrl;
+      _model.text = preset.model;
+      _probe = null;
+      _formError = null;
+    });
   }
 
   /// 校验并保存：先探针（能力/工具支持），过了才落表。
@@ -430,13 +640,21 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
     });
 
     try {
-      // 编辑时若未改 key，用已存条目 id 让后端解密后校验；否则用明文校验。
-      final useExistingKey = _isEdit && _apiKey.text.trim().isEmpty;
+      // 编辑/克隆时若未改 key，用原条目的 key 校验当前表单字段。
+      final keySourceId =
+          (_isEdit || _isClone) &&
+              !_isCodexProvider &&
+              _apiKey.text.trim().isEmpty
+          ? widget.entry!.id
+          : null;
       final probe = await widget.service.validate(
-        id: useExistingKey ? widget.entry!.id : null,
-        baseUrl: useExistingKey ? null : _baseUrl.text.trim(),
-        model: useExistingKey ? null : _model.text.trim(),
-        apiKey: useExistingKey ? null : _apiKey.text.trim(),
+        provider: _provider.text.trim(),
+        baseUrl: _baseUrl.text.trim(),
+        model: _model.text.trim(),
+        apiKey: keySourceId != null || _isCodexProvider
+            ? null
+            : _apiKey.text.trim(),
+        apiKeySourceId: keySourceId,
       );
       if (!mounted) return;
       setState(() => _probe = probe);
@@ -447,13 +665,18 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
       }
 
       await widget.service.upsert(
-        id: widget.entry?.id,
-        label:
-            _label.text.trim().isEmpty ? _model.text.trim() : _label.text.trim(),
+        id: _isEdit ? widget.entry?.id : null,
+        label: _label.text.trim().isEmpty
+            ? _model.text.trim()
+            : _label.text.trim(),
         provider: _provider.text.trim(),
         baseUrl: _baseUrl.text.trim(),
         model: _model.text.trim(),
-        apiKey: _apiKey.text.trim(),
+        apiKey: _isCodexProvider ? null : _apiKey.text.trim(),
+        apiKeySourceId:
+            _isClone && !_isCodexProvider && _apiKey.text.trim().isEmpty
+            ? widget.entry!.id
+            : null,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -471,24 +694,45 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
     return AlertDialog(
       title: Row(
         children: [
-          Icon(_isEdit ? Icons.edit_outlined : Icons.add, size: 18),
+          Icon(
+            _isClone
+                ? Icons.copy_all_outlined
+                : (_isEdit ? Icons.edit_outlined : Icons.add),
+            size: 18,
+          ),
           const SizedBox(width: 8),
-          Text(_isEdit ? '编辑模型' : '添加模型'),
+          Text(_isClone ? '克隆模型' : (_isEdit ? '编辑模型' : '添加模型')),
         ],
       ),
-      content: SizedBox(
-        width: 480,
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: 640,
+          maxWidth: MediaQuery.sizeOf(context).width * 0.72,
+        ),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _presetGrid(),
+              const SizedBox(height: 8),
               _field(_label, '显示名称', hint: '如 DeepSeek Chat（留空用 model）'),
-              _field(_provider, 'Provider', hint: '展示用标签，如 deepseek'),
-              _field(_baseUrl, 'Base URL',
-                  required: true,
-                  hint: 'OpenAI 标准，如 https://api.deepseek.com/v1'),
+              _field(
+                _provider,
+                'Provider',
+                hint: '展示用标签，如 deepseek',
+                onChanged: (_) => setState(() {
+                  _probe = null;
+                  _formError = null;
+                }),
+              ),
+              _field(
+                _baseUrl,
+                'Base URL',
+                required: true,
+                hint: 'OpenAI 标准，如 https://api.deepseek.com/v1',
+              ),
               _field(_model, 'Model', required: true, hint: '如 deepseek-chat'),
-              _keyField(),
+              if (_isCodexProvider) _codexAuthNote() else _keyField(),
               if (_formError != null) ...[
                 const SizedBox(height: 12),
                 _banner(_formError!, AppColors.danger, Icons.error_outline),
@@ -524,12 +768,127 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
     );
   }
 
-  Widget _field(TextEditingController c, String label,
-      {String? hint, bool required = false}) {
+  Widget _presetGrid() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.bg.withValues(alpha: 0.55),
+        borderRadius: AppShape.borderRadius,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.tune, size: 15, color: AppColors.textMuted),
+              SizedBox(width: 7),
+              Text(
+                'Provider 预设',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final preset in _modelPresets) _presetButton(preset),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _presetButton(_ModelPreset preset) {
+    final selected =
+        _provider.text.trim() == preset.provider &&
+        _baseUrl.text.trim() == preset.baseUrl &&
+        _model.text.trim() == preset.model;
+    return Tooltip(
+      message: '${preset.baseUrl}\n${preset.model}',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: _busy ? null : () => _applyPreset(preset),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 58),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppColors.accent.withValues(alpha: 0.14)
+                  : AppColors.surfaceHigh.withValues(alpha: 0.64),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected
+                    ? AppColors.accent.withValues(alpha: 0.72)
+                    : AppColors.border,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  preset.icon,
+                  size: 17,
+                  color: selected ? AppColors.accent : AppColors.textSecondary,
+                ),
+                const SizedBox(width: 7),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      preset.title,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      preset.subtitle,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 10.5,
+                        height: 1.1,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _field(
+    TextEditingController c,
+    String label, {
+    String? hint,
+    bool required = false,
+    ValueChanged<String>? onChanged,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: TextField(
         controller: c,
+        onChanged: onChanged,
         decoration: InputDecoration(
           labelText: required ? '$label *' : label,
           hintText: hint,
@@ -545,8 +904,10 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
         controller: _apiKey,
         obscureText: _obscureKey,
         decoration: InputDecoration(
-          labelText: _isEdit ? 'API Key' : 'API Key *',
-          hintText: _isEdit ? '留空 = 不修改原 key' : '必填',
+          labelText: (_isEdit || _isClone) ? 'API Key' : 'API Key *',
+          hintText: _isClone
+              ? '留空 = 沿用原 key'
+              : (_isEdit ? '留空 = 不修改原 key' : '必填'),
           suffixIcon: IconButton(
             icon: Icon(
               _obscureKey ? Icons.visibility_off : Icons.visibility,
@@ -555,6 +916,34 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
             ),
             onPressed: () => setState(() => _obscureKey = !_obscureKey),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _codexAuthNote() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.accent.withValues(alpha: 0.08),
+          borderRadius: AppShape.borderRadius,
+          border: Border.all(color: AppColors.accent.withValues(alpha: 0.24)),
+        ),
+        child: const Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.login, size: 15, color: AppColors.accent),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'OpenAI Codex 使用本机 Codex 登录态，不需要 API Key。若校验失败，请先运行 codex login。',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -584,25 +973,25 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
 
   Widget _probeReport(ProbeResult p) {
     Widget row(String label, bool ok) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(
-            children: [
-              Icon(
-                ok ? Icons.check_circle : Icons.cancel,
-                size: 15,
-                color: ok ? AppColors.success : AppColors.danger,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                ),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(
+            ok ? Icons.check_circle : Icons.cancel,
+            size: 15,
+            color: ok ? AppColors.success : AppColors.danger,
           ),
-        );
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
     final color = p.ok ? AppColors.success : AppColors.warning;
     return Container(
       width: double.infinity,
@@ -617,8 +1006,11 @@ class _ModelEditorDialogState extends State<_ModelEditorDialog> {
         children: [
           Row(
             children: [
-              Icon(p.ok ? Icons.verified : Icons.warning_amber_rounded,
-                  size: 16, color: color),
+              Icon(
+                p.ok ? Icons.verified : Icons.warning_amber_rounded,
+                size: 16,
+                color: color,
+              ),
               const SizedBox(width: 6),
               Text(
                 p.ok ? '校验通过' : '校验未通过',

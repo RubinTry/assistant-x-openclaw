@@ -212,9 +212,24 @@ class OpenClawBridgeWebSocket:
         self._ws = None
 
     def send_stop_command(self) -> bool:
-        """异步中断：WebSocket chat.abort。
+        """软停止：打断/退下时调用。
 
-        chat.abort 在 runtime 是 O(1) 的 cancel，不需要等任何回复。"""
+        OpenClaw WebSocket 桥暂无细粒度软停止——打断仍发送 chat.abort，
+        但 Hermes 侧的 _cleanup_task_resources 已不再清理浏览器，
+        所以浏览器等后台资源仍会保留（断点续传）。
+        """
+        return self._send_abort("打断（软停止）")
+
+    def cancel_task(self) -> bool:
+        """硬取消：快路径识别到「中断任务」意图时调用。
+
+        断开 WebSocket 连接，触发 agent 清理浏览器等后台资源。
+        """
+        logger.info("硬取消任务（中断任务意图）")
+        return self._send_abort("硬取消任务")
+
+    def _send_abort(self, reason: str) -> bool:
+        """内部：发送 chat.abort。"""
         if not self.token:
             logger.error("Gateway token 不可用")
             return False

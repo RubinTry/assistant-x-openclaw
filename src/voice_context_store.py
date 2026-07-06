@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Shared voice context store.
+
+Fast-path replies and engine replies live in different systems. This module
+keeps a small, project-owned JSONL log so both lanes can see the same recent
+voice conversation without writing into Hermes/OpenClaw internal databases.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from collections import deque
+
+_PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_STORE_DIR = os.path.join(_PROJECT_DIR, "data", "voice_context")
+_MAX_CONTENT_CHARS = 4000
+_MAX_FILE_BYTES = 2 * 1024 * 1024
+_TRIM_KEEP_LINES = 1200
+_lock = threading.RLock()
+
+
+def _norm(agent_id: str) -> str:
+    keep = []
+    for ch in (agent_id or "main").strip().replace("-", "_"):
+        if ch.isalnum() or ch in ("_", "-"):
+            keep.append(ch)
+    return "".join(keep) or "main"
+
+
+def _path(agent_id: str) -> str:
+    return os.path.join(_STORE_DIR, f"{_norm(agent_id)}.jsonl")
+
+
+def append_turn(
+    agent_id: str,
+    lane: str,
+    role: str,
+    content: str,
+    *,
+    session_id: str = "",
+    session_key: str = "",
+) -> None:
+    """Append one clean voice turn. Fail-open: storage must never break chat."""
+    text = (content or "").strip()
+    if not text or role not in ("user", "assistant"):
+        return
+    item = {
+        "ts": time.time(),
+        "agent_id": _norm(agent_id),
+        "lane": (lane or "unknown").strip() or "unknown",
+        "role": role,
+        "content": text[:_MAX_CONTENT_CHARS],
+        "session_id": session_id or "",
+        "session_key": session_key or "",
+    }
+    try:
+        with _lock:
+            os.makedirs(_STORE_DIR, exist_ok=True)
+            p = _path(agent_id)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")))
+                f.write("\n")
+            _trim_if_needed(p)
+    except Exception:
+        return
+
+
+def recent_turns(
+    agent_id: str,
+    *,
+    limit: int = 8,
+    lanes: set[str] | None = None,
+    since_ts: float | None = None,
+) -> list[dict]:
+    """Return recent turns in chronological order."""
+    rows = _read_tail(agent_id, max_lines=max(limit * 8, 80))
+    if lanes:
+        rows = [r for r in rows if r.get("lane") in lanes]
+    if since_ts is not None:
+        rows = [r for r in rows if float(r.get("ts") or 0) >= since_ts]
+    rows = [
+        {
+            "role": r.get("role"),
+            "content": r.get("content") or "",
+            "lane": r.get("lane") or "",
+            "ts": r.get("ts") or 0,
+        }
+        for r in rows
+        if r.get("role") in ("user", "assistant") and r.get("content")
+    ]
+    return rows[-limit:]
+
+
+def recent_fast_context(agent_id: str, *, limit: int = 8) -> list[dict]:
+    return recent_turns(agent_id, limit=limit, lanes={"fast"})
+
+
+def _read_tail(agent_id: str, max_lines: int = 200) -> list[dict]:
+    p = _path(agent_id)
+    if not os.path.exists(p):
+        return []
+    out = []
+    try:
+        with _lock:
+            with open(p, "r", encoding="utf-8") as f:
+                lines = deque(f, maxlen=max_lines)
+        for line in lines:
+            try:
+                obj = json.loads(line)
+            except (ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(obj, dict):
+                out.append(obj)
+    except OSError:
+        return []
+    return out
+
+
+def _trim_if_needed(path: str) -> None:
+    try:
+        if os.path.getsize(path) <= _MAX_FILE_BYTES:
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            lines = deque(f, maxlen=_TRIM_KEEP_LINES)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        os.replace(tmp, path)
+    except OSError:
+        return

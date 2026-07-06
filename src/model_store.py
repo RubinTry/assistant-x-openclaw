@@ -50,6 +50,13 @@ _TABLE_VERSION = 1
 _lock = threading.RLock()
 _fernet = None
 
+CODEX_PROVIDER = "openai-codex"
+CODEX_BASE_URL = "codex://local"
+
+
+def is_codex_provider(provider: str) -> bool:
+    return (provider or "").strip().lower() == CODEX_PROVIDER
+
 
 # ── 加密密钥 ─────────────────────────────────────────────────────────
 
@@ -176,25 +183,35 @@ def upsert_model(entry: dict) -> dict:
     """
     if not isinstance(entry, dict):
         raise ValueError("entry 必须是对象")
+    provider = (entry.get("provider") or "").strip()
+    codex_provider = is_codex_provider(provider)
     base_url = (entry.get("base_url") or "").strip()
+    if codex_provider and not base_url:
+        base_url = CODEX_BASE_URL
     model = (entry.get("model") or "").strip()
     if not base_url or not model:
         raise ValueError("base_url 与 model 为必填")
 
     entry_id = (entry.get("id") or "").strip()
     label = (entry.get("label") or "").strip() or model
-    provider = (entry.get("provider") or "").strip()
     api_key = entry.get("api_key")
+    api_key_source_id = (entry.get("api_key_source_id") or "").strip()
 
     with _lock:
         data = _load()
         models = data["models"]
         if not entry_id:
-            entry_id = _slug(label) or uuid.uuid4().hex[:8]
+            entry_id = _unique_entry_id(_slug(label) or uuid.uuid4().hex[:8], models)
         existing = next((e for e in models if e.get("id") == entry_id), None)
+        source_api_key_enc = None
+        if api_key_source_id:
+            source = next((e for e in models if e.get("id") == api_key_source_id), None)
+            if source is None:
+                raise ValueError("api_key_source_id 指向的模型不存在")
+            source_api_key_enc = source.get("api_key_enc")
 
         if existing is None:
-            if not api_key:
+            if not api_key and not source_api_key_enc and not codex_provider:
                 raise ValueError("新增模型必须提供 api_key")
             record = {
                 "id": entry_id,
@@ -202,10 +219,13 @@ def upsert_model(entry: dict) -> dict:
                 "provider": provider,
                 "base_url": base_url,
                 "model": model,
-                "api_key_enc": _encrypt(str(api_key)),
                 "created_at": _now(),
                 "updated_at": _now(),
             }
+            if api_key:
+                record["api_key_enc"] = _encrypt(str(api_key))
+            elif source_api_key_enc:
+                record["api_key_enc"] = source_api_key_enc
             models.append(record)
         else:
             existing.update({
@@ -218,6 +238,8 @@ def upsert_model(entry: dict) -> dict:
             # api_key 留空 = 保持原值不变；非空 = 重新加密覆盖
             if api_key:
                 existing["api_key_enc"] = _encrypt(str(api_key))
+            elif codex_provider:
+                existing.pop("api_key_enc", None)
             record = existing
 
         # 首条自动设为 current
@@ -265,10 +287,13 @@ def get_current_decrypted() -> dict | None:
         entry = next((e for e in data["models"] if e.get("id") == cur), None)
         if entry is None:
             return None
-        try:
-            api_key = _decrypt(entry.get("api_key_enc", ""))
-        except (InvalidToken, ValueError, TypeError):
-            return None
+        if is_codex_provider(entry.get("provider", "")):
+            api_key = ""
+        else:
+            try:
+                api_key = _decrypt(entry.get("api_key_enc", ""))
+            except (InvalidToken, ValueError, TypeError):
+                return None
         return {
             "id": entry.get("id"),
             "label": entry.get("label"),
@@ -290,10 +315,13 @@ def get_decrypted(entry_id: str) -> dict | None:
         entry = next((e for e in data["models"] if e.get("id") == entry_id), None)
         if entry is None:
             return None
-        try:
-            api_key = _decrypt(entry.get("api_key_enc", ""))
-        except (InvalidToken, ValueError, TypeError):
-            return None
+        if is_codex_provider(entry.get("provider", "")):
+            api_key = ""
+        else:
+            try:
+                api_key = _decrypt(entry.get("api_key_enc", ""))
+            except (InvalidToken, ValueError, TypeError):
+                return None
         return {
             "id": entry.get("id"),
             "label": entry.get("label"),
@@ -315,3 +343,14 @@ def _slug(text: str) -> str:
     while "--" in slug:
         slug = slug.replace("--", "-")
     return slug[:40]
+
+
+def _unique_entry_id(base: str, models: list[dict]) -> str:
+    existing_ids = {e.get("id") for e in models}
+    candidate = base
+    i = 2
+    while candidate in existing_ids:
+        suffix = f"-{i}"
+        candidate = f"{base[:40 - len(suffix)]}{suffix}"
+        i += 1
+    return candidate

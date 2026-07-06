@@ -14,10 +14,12 @@ import 'dart:io';
 class ModelService {
   /// 项目根目录（与声纹服务同一约定）。
   String get _projectDir {
-    final home = Platform.environment['HOME'] ??
+    final home =
+        Platform.environment['HOME'] ??
         Platform.environment['USERPROFILE'] ??
         '';
-    final base = '$home/.openclaw/workspace/voice-assistant/assistant-x-openclaw';
+    final base =
+        '$home/.openclaw/workspace/voice-assistant/assistant-x-openclaw';
     return Platform.isWindows ? base.replaceAll('/', '\\') : base;
   }
 
@@ -77,15 +79,21 @@ class ModelService {
     required String baseUrl,
     required String model,
     String? apiKey,
+    String? apiKeySourceId,
   }) async {
-    await _run('upsert', payload: {
-      if (id != null && id.isNotEmpty) 'id': id,
-      'label': label,
-      'provider': provider,
-      'base_url': baseUrl,
-      'model': model,
-      if (apiKey != null && apiKey.isNotEmpty) 'api_key': apiKey,
-    });
+    await _run(
+      'upsert',
+      payload: {
+        if (id != null && id.isNotEmpty) 'id': id,
+        'label': label,
+        'provider': provider,
+        'base_url': baseUrl,
+        'model': model,
+        if (apiKey != null && apiKey.isNotEmpty) 'api_key': apiKey,
+        if (apiKeySourceId != null && apiKeySourceId.isNotEmpty)
+          'api_key_source_id': apiKeySourceId,
+      },
+    );
   }
 
   Future<void> setCurrent(String id) => _run('current', payload: {'id': id});
@@ -95,17 +103,25 @@ class ModelService {
   /// 能力探针：新条目传明文，或已存条目传 id（后端解密）。
   Future<ProbeResult> validate({
     String? id,
+    String? provider,
     String? baseUrl,
     String? model,
     String? apiKey,
+    String? apiKeySourceId,
   }) async {
-    final data = await _run('validate', payload: {
-      if (id != null && id.isNotEmpty) 'id': id,
-      if (baseUrl != null) 'base_url': baseUrl,
-      if (model != null) 'model': model,
-      if (apiKey != null) 'api_key': apiKey,
-    });
-    return ProbeResult.fromJson((data['result'] as Map).cast<String, dynamic>());
+    final payload = <String, dynamic>{};
+    if (id != null && id.isNotEmpty) payload['id'] = id;
+    if (provider != null) payload['provider'] = provider;
+    if (baseUrl != null) payload['base_url'] = baseUrl;
+    if (model != null) payload['model'] = model;
+    if (apiKey != null) payload['api_key'] = apiKey;
+    if (apiKeySourceId != null && apiKeySourceId.isNotEmpty) {
+      payload['api_key_source_id'] = apiKeySourceId;
+    }
+    final data = await _run('validate', payload: payload);
+    return ProbeResult.fromJson(
+      (data['result'] as Map).cast<String, dynamic>(),
+    );
   }
 }
 
@@ -122,11 +138,11 @@ class ModelTable {
   ModelTable({this.current, required this.models});
 
   factory ModelTable.fromJson(Map<String, dynamic> j) => ModelTable(
-        current: j['current'] as String?,
-        models: ((j['models'] as List?) ?? [])
-            .map((e) => ModelEntry.fromJson((e as Map).cast<String, dynamic>()))
-            .toList(),
-      );
+    current: j['current'] as String?,
+    models: ((j['models'] as List?) ?? [])
+        .map((e) => ModelEntry.fromJson((e as Map).cast<String, dynamic>()))
+        .toList(),
+  );
 }
 
 class ModelEntry {
@@ -148,14 +164,14 @@ class ModelEntry {
   });
 
   factory ModelEntry.fromJson(Map<String, dynamic> j) => ModelEntry(
-        id: (j['id'] ?? '').toString(),
-        label: (j['label'] ?? '').toString(),
-        provider: (j['provider'] ?? '').toString(),
-        baseUrl: (j['base_url'] ?? '').toString(),
-        model: (j['model'] ?? '').toString(),
-        apiKeyMasked: (j['api_key'] ?? '').toString(),
-        apiKeySet: j['api_key_set'] == true,
-      );
+    id: (j['id'] ?? '').toString(),
+    label: (j['label'] ?? '').toString(),
+    provider: (j['provider'] ?? '').toString(),
+    baseUrl: (j['base_url'] ?? '').toString(),
+    model: (j['model'] ?? '').toString(),
+    apiKeyMasked: (j['api_key'] ?? '').toString(),
+    apiKeySet: j['api_key_set'] == true,
+  );
 }
 
 class ProbeResult {
@@ -175,11 +191,11 @@ class ProbeResult {
   });
 
   factory ProbeResult.fromJson(Map<String, dynamic> j) => ProbeResult(
-        ok: j['ok'] == true,
-        reachable: j['reachable'] == true,
-        authOk: j['auth_ok'] == true,
-        modelOk: j['model_ok'] == true,
-        toolSupport: j['tool_support'] == true,
-        message: (j['message'] ?? '').toString(),
-      );
+    ok: j['ok'] == true,
+    reachable: j['reachable'] == true,
+    authOk: j['auth_ok'] == true,
+    modelOk: j['model_ok'] == true,
+    toolSupport: j['tool_support'] == true,
+    message: (j['message'] ?? '').toString(),
+  );
 }

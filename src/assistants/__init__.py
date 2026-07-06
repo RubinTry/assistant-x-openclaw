@@ -168,19 +168,35 @@ class AssistantInstance:
         logger.warning(f"未知 Assistant 特效: {self.id} (spec={spec})，使用空实现")
         return NullAssistantVisual()
 
+    def _tts_config(self, spec: str) -> dict:
+        """取 tts_configs.<spec>，无则退到 tts_config。"""
+        per_engine = (self.config.get("tts_configs") or {}).get(spec)
+        return per_engine if per_engine is not None else self._get_sub_config("tts")
+
     def _create_tts(self):
         spec = self._get_component_spec("tts")
 
         if spec == "jarvis":
             from assistants.jarvis.tts import JarvisTTS
 
-            return JarvisTTS(self._get_sub_config("tts"))
+            return JarvisTTS(self._tts_config(spec))
 
         if spec == "custom":
             from assistants.custom_tts import CustomTTS
 
-            cfg = self._get_sub_config("tts")
-            return CustomTTS(cfg)
+            return CustomTTS(self._tts_config(spec))
+
+        if spec == "macos_say":
+            from assistants.macos_say_tts import MacosSayTTS
+
+            return MacosSayTTS(self._tts_config(spec))
+
+        # 零样本克隆说话人：由 tts_configs.<spec>.engine 指定
+        tts_cfg = self._tts_config(spec)
+        if tts_cfg.get("engine") == "zipvoice":
+            from assistants.jarvis.tts import ZipVoiceTTS
+
+            return ZipVoiceTTS(tts_cfg)
 
         if spec and ":" in spec:
             try:

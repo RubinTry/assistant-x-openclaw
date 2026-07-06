@@ -1,6 +1,8 @@
 {
     "engine_comment": "主脑引擎，可选值：openclaw（默认）、hermes",
     "engine": "hermes",
+    "fastMode_comment": "是否启用快路径模式：true 时轻量对话先走 Control Center 配置的快模型，重任务再升级到 agent；可降低响应延迟，但因路由/人设/记忆注入会额外消耗 token，通常约为普通 agent-only 模式的 1.2~1.7 倍。",
+    "fastMode": true,
     "default": "jarvis",
     "overlay_debug_mode": false,
     "dock_autohide_on_wake_comment": "true 时助手激活期自动隐藏系统 Dock，退回待机还原（仅 macOS）",
@@ -14,23 +16,42 @@
             "components": {
                 "feedback": "jarvis",
                 "visual": "jarvis",
+                "tts_comment": "tts 可选值:jarvis,macos_say",
                 "tts": "jarvis"
             },
             "keywords_file": "keywords/jarvis.txt",
             "asr_mode": "offline",
-            "tts_config": {
-                "metallic": {
-                    "enabled": true,
-                    "af": {
-                        "aecho": "0.8:0.85:20|45|70:0.45|0.32|0.12",
-                        "chorus": "0.4:0.6:45:0.2:0.18:1.2",
-                        "bass": "g=4:f=110",
-                        "treble": "g=2.5",
-                        "highpass": "f=90",
-                        "lowpass": "f=8500"
-                    }
+            "tts_configs": {
+                "jarvis": {
+                    "metallic": {
+                        "enabled": true,
+                        "af": {
+                            "aecho": "0.8:0.85:20|45|70:0.45|0.32|0.12",
+                            "chorus": "0.4:0.6:45:0.2:0.18:1.2",
+                            "bass": "g=4:f=110",
+                            "treble": "g=2.5",
+                            "highpass": "f=90",
+                            "lowpass": "f=8500"
+                        }
+                    },
+                    "speed": 1.2
                 },
-                "speed": 1.2
+                "macos_say": {
+                    "voice": "Lee",
+                    "rate": 180,
+                     "metallic": {
+                        "enabled": false,
+                        "af": {
+                            "aecho": "0.8:0.85:20|45|70:0.45|0.32|0.12",
+                            "chorus": "0.4:0.6:45:0.2:0.18:1.2",
+                            "bass": "g=4:f=110",
+                            "treble": "g=2.5",
+                            "highpass": "f=90",
+                            "lowpass": "f=8500"
+                        }
+                    },
+                    "speed": 1.2
+                }
             },
             "wake_lines": [
                 "Reporting for duty, sir. I'm all ears.",
@@ -221,6 +242,11 @@
                 "reboot",
                 "重启",
                 "重新启动"
+            ],
+            "interrupt_words_comment": "播放期打断词（方案B）：说这些词可打断TTS播报。中英均可（中文走pypinyin，英文查模型en.phone词典）。启动时自动生成 keywords/interrupt/<id>.txt，无需手动。",
+            "interrupt_words": [
+                "shut up",
+                "wait wait"
             ]
         },
         {
@@ -311,6 +337,9 @@
             "restart_keywords": [
                 "重启",
                 "重新启动"
+            ],
+            "interrupt_words": [
+                "不对不对"
             ]
         }
     ]

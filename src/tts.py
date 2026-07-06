@@ -76,8 +76,20 @@ def _clean_text_for_tts(text: str) -> str:
 _TTS_SENT_END = "。！？!?；;…\n"
 
 
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("%s=%r 无效，使用默认值 %s", name, value, default)
+        return default
+
+
 def _batch_sentences(text: str, max_sentences: int = 4):
     """按句末标点切分，每 max_sentences 句一批。长句不一次性整段合成。"""
+    max_sentences = max(1, _env_int("VOICE_ASSISTANT_TTS_MAX_SENTENCES", max_sentences))
     batches = []
     cur = []
     count = 0

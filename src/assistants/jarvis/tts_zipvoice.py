@@ -22,10 +22,38 @@ ZIPVOICE_DIR = os.path.join(
     _PROJECT_DIR, "models", "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
 )
 VOCODER = os.path.join(_PROJECT_DIR, "models", "vocos_24khz.onnx")
-REF_AUDIO = os.path.join(_PROJECT_DIR, "data", "voices", "jarvis_start_up.mp3")
-REF_TEXT = "Allow me to introduce myself I am jarvis, a virtual artificial intelligence importing all preferences from home interface systems are now fully operational."
+
+_DEFAULT_REF_AUDIO = os.path.join(_PROJECT_DIR, "data", "voices", "jarvis_start_up.mp3")
+_DEFAULT_REF_TEXT = "Allow me to introduce myself I am jarvis, a virtual artificial intelligence importing all preferences from home interface systems are now fully operational."
+
+# 当前生效的参考说话人，可由 configure() 覆盖。
+REF_AUDIO = _DEFAULT_REF_AUDIO
+REF_TEXT = _DEFAULT_REF_TEXT
 
 _tts = None
+
+
+def configure(config: dict) -> None:
+    """注入 assistants.json 的 tts_configs.<spec> 配置，切换参考说话人。
+
+    支持字段：
+      - ref_audio: 参考音频路径（相对项目根或绝对路径）
+      - ref_text:  参考音频对应文本（零样本克隆必需，须与音频内容一致）
+    未提供则回退到默认贾维斯说话人。
+    """
+    global REF_AUDIO, REF_TEXT, _ref_audio_cache
+    ref_audio = (config or {}).get("ref_audio")
+    ref_text = (config or {}).get("ref_text")
+
+    if ref_audio:
+        REF_AUDIO = ref_audio if os.path.isabs(ref_audio) else os.path.join(_PROJECT_DIR, ref_audio)
+    else:
+        REF_AUDIO = _DEFAULT_REF_AUDIO
+    REF_TEXT = ref_text if ref_text else _DEFAULT_REF_TEXT
+
+    # 参考说话人变了，作废已缓存的参考音频
+    _ref_audio_cache = None
+    logger.info(f"ZipVoice 参考说话人已切换: audio={REF_AUDIO}")
 
 
 def _create_tts():

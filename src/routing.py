@@ -24,12 +24,19 @@ _HEAVY_MARKERS = (
     # 通信 / 日程 / 提醒
     "发消息", "发邮件", "发给", "提醒我", "定个闹钟", "定时", "日程", "安排一下",
     # 媒体控制
-    "播放", "放首歌", "下一首", "暂停音乐",
+    "播放", "放首歌", "放首", "放一首", "下一首", "暂停音乐",
+    "来首", "来一首", "来点", "来一段", "来段", "来点音乐",
+    "来小曲", "来一小曲", "来点小曲", "来曲", "来首曲",
+    "放点音乐", "放点歌", "来点歌", "来首歌",
     # 记忆指代（依赖跨会话记忆）
     "还记得", "你记得", "我上次说", "上次那个", "之前那个", "我之前", "记一下", "记住",
+    # 中断任务意图——需要 agent 调用 cleanup_browser 等工具真正停止任务
+    "别打开", "别搜", "别执行", "取消刚才", "取消刚才的操作", "别继续",
+    "停止操作", "中断操作", "不要打开", "不要搜",
     # 英文强信号
     "search ", "google ", "open the", "play ", "remind me", "send a", "send an",
     "screenshot", "run this", "what's the latest", "look up",
+    "don't open", "don't search", "cancel that", "stop that", "cancel the",
 )
 
 
@@ -38,4 +45,7 @@ def is_obviously_heavy(text: str) -> bool:
     if not text:
         return False
     low = text.strip().lower()
-    return any(m in low for m in _HEAVY_MARKERS)
+    if any(m in low for m in _HEAVY_MARKERS):
+        return True
+    import heavy_store
+    return heavy_store.contains(text)

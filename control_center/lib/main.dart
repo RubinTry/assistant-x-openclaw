@@ -111,11 +111,13 @@ class ControlCenterApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       // 自定义标题栏常驻所有页面顶部（含 Navigator 内的推入路由）
-      builder: (context, child) => Column(
-        children: [
-          const WindowTitleBar(),
-          Expanded(child: child ?? const SizedBox.shrink()),
-        ],
+      builder: (context, child) => HudBackground(
+        child: Column(
+          children: [
+            const WindowTitleBar(),
+            Expanded(child: child ?? const SizedBox.shrink()),
+          ],
+        ),
       ),
       home: HomePage(key: homePageKey),
     );

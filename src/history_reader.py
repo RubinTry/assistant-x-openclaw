@@ -25,6 +25,8 @@ import re
 import sqlite3
 from abc import ABC, abstractmethod
 
+import voice_context_store
+
 _HERMES_HOME = os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes"))
 _OPENCLAW_HOME = os.path.expanduser("~/.openclaw")
 
@@ -88,8 +90,9 @@ class HermesHistoryReader(IHistoryReader):
 
     def recent_turns(self, limit: int = 6) -> list[dict]:
         conn = _connect_ro(self.state_db)
+        db_turns = []
         if conn is None:
-            return []
+            return voice_context_store.recent_turns(self.aid, limit=limit)
         try:
             rows = conn.execute(
                 """
@@ -101,12 +104,13 @@ class HermesHistoryReader(IHistoryReader):
                 """,
                 (self._session_like, limit),
             ).fetchall()
+            db_turns = [{"role": r[0], "content": r[1]} for r in reversed(rows)]
         except sqlite3.Error:
-            return []
+            db_turns = []
         finally:
             conn.close()
-        # 倒序取出的，翻正为时间正序
-        return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+        shared = voice_context_store.recent_turns(self.aid, limit=limit)
+        return (db_turns + shared)[-limit:] if shared else db_turns[-limit:]
 
     def search_memory(self, query: str, limit: int = 5) -> list[str]:
         match = _fts_query(query)
@@ -181,7 +185,7 @@ class OpenClawHistoryReader(IHistoryReader):
     def recent_turns(self, limit: int = 6) -> list[dict]:
         path = self._current_jsonl()
         if not path:
-            return []
+            return voice_context_store.recent_turns(self.aid, limit=limit)
         turns: list[dict] = []
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -201,7 +205,8 @@ class OpenClawHistoryReader(IHistoryReader):
                         turns.append({"role": role, "content": text})
         except OSError:
             return []
-        return turns[-limit:]
+        shared = voice_context_store.recent_turns(self.aid, limit=limit)
+        return (turns + shared)[-limit:] if shared else turns[-limit:]
 
     @staticmethod
     def _extract_text(content) -> str:

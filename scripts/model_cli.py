@@ -76,13 +76,24 @@ def main(argv) -> None:
                 if dec is None:
                     _fail(f"模型 {entry_id} 不存在或解密失败")
                 base_url, model, api_key = dec["base_url"], dec["model"], dec["api_key"]
+                provider = dec.get("provider") or ""
             else:
                 base_url = (body.get("base_url") or "").strip()
                 model = (body.get("model") or "").strip()
+                provider = (body.get("provider") or "").strip()
                 api_key = body.get("api_key") or ""
-                if not base_url or not model or not api_key:
-                    _fail("校验需要 base_url、model、api_key（或已存条目的 id）")
-            _emit({"result": model_probe.probe_model(base_url, model, api_key)})
+                api_key_source_id = (body.get("api_key_source_id") or "").strip()
+                if not api_key and api_key_source_id:
+                    source = model_store.get_decrypted(api_key_source_id)
+                    if source is None:
+                        _fail(f"模型 {api_key_source_id} 不存在或解密失败")
+                    api_key = source.get("api_key") or ""
+                is_codex = model_probe.is_codex_provider(provider)
+                if not model or (not is_codex and (not base_url or not api_key)):
+                    _fail("校验需要 base_url、model、api_key（或已存条目的 id）；openai-codex 不需要 api_key")
+            _emit({"result": model_probe.probe_model(
+                base_url, model, api_key, provider=provider,
+            )})
 
         else:
             _fail(f"未知命令: {cmd}")

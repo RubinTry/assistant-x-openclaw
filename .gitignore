@@ -112,6 +112,9 @@ data/enrollment/*.json
 # Auto-generated keywords file (merged at startup)
 keywords/global.txt
 
+# Auto-generated interrupt keywords (启动时由 assistants.json 的 interrupt_words 生成)
+keywords/interrupt/
+
 # Chrome device cache
 .dart_tool/chrome-device/
 
@@ -145,3 +148,4 @@ assistant_overlay/assets/ironman/*.png
 # 模型表与其加密 master key（含加密后的 api_key，机器相关，不入库）
 model_table.json
 data/.model_key
+data/voice_context/

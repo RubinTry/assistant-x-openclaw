@@ -116,9 +116,9 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
         await _service.clearAllSpeakers();
         await _loadSpeakers();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已清空所有声纹')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('已清空所有声纹')));
         }
       } catch (e) {
         if (mounted) {
@@ -131,9 +131,9 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
                 height: 200,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E1E),
+                    color: AppColors.bg,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade800),
+                    border: Border.all(color: AppColors.borderBright),
                   ),
                   padding: const EdgeInsets.all(12),
                   child: SingleChildScrollView(
@@ -142,7 +142,7 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
                       style: const TextStyle(
                         fontFamily: 'monospace',
                         fontSize: 12,
-                        color: Color(0xFFE0E0E0),
+                        color: AppColors.consoleText,
                       ),
                     ),
                   ),
@@ -165,7 +165,7 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('声纹管理'),
+        title: const Text('声纹身份'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -174,71 +174,89 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: AppColors.accent),
-            )
-          : _speakers.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.record_voice_over_outlined,
-                          size: 56, color: AppColors.textMuted),
-                      const SizedBox(height: 16),
-                      const Text(
-                        '暂无已注册的声纹样本',
-                        style: TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
+      body: Column(
+        children: [
+          _identityHeader(),
+          Expanded(
+            child: _isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.accent),
+                  )
+                : _speakers.isEmpty
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ReactorMark(
+                          size: 58,
+                          icon: Icons.record_voice_over_outlined,
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '注册后可用声纹验证唤醒，防止他人冒用',
-                        style: TextStyle(
-                            color: AppColors.textMuted, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(20),
-                  itemCount: _speakers.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (ctx, i) {
-                    final speaker = _speakers[i];
-                    return Panel(
-                      child: ListTile(
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                        leading: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: AppColors.accent.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.person_outline,
-                              color: AppColors.accent, size: 20),
-                        ),
-                        title: Text(
-                          speaker,
-                          style: const TextStyle(
+                        SizedBox(height: 16),
+                        Text(
+                          '暂无已注册的声纹样本',
+                          style: TextStyle(
                             color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline,
-                              color: AppColors.danger, size: 20),
-                          onPressed: () => _deleteSpeaker(i),
+                        SizedBox(height: 6),
+                        Text(
+                          '注册后可用声纹验证唤醒，防止他人冒用',
+                          style: TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(20),
+                    itemCount: _speakers.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (ctx, i) {
+                      final speaker = _speakers[i];
+                      return Panel(
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 6,
+                          ),
+                          leading: const ReactorMark(
+                            size: 38,
+                            icon: Icons.person_outline,
+                          ),
+                          title: Text(
+                            speaker,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          subtitle: const Text(
+                            '授权声纹样本',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 11,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            tooltip: '删除',
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: AppColors.danger,
+                              size: 20,
+                            ),
+                            onPressed: () => _deleteSpeaker(i),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -257,6 +275,57 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _identityHeader() {
+    final active = _speakers.isNotEmpty;
+    final color = active ? AppColors.success : AppColors.warning;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceGlass,
+        borderRadius: AppShape.borderRadius,
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.security, color: color, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  active ? '声纹闸门已配置' : '声纹闸门待配置',
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  active
+                      ? '当前有 ${_speakers.length} 个授权样本，可用于唤醒验证。'
+                      : '注册至少一个声纹样本后，助手才能识别授权使用者。',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          StatusPill(
+            active: active,
+            activeText: '${_speakers.length} 个样本',
+            inactiveText: '未注册',
+          ),
+        ],
       ),
     );
   }
@@ -299,7 +368,8 @@ class _EnrollDialogState extends State<_EnrollDialog> {
     // 必须显式提示出来，否则用户会以为是声纹逻辑本身的 bug。
     final dndOk = await _vaService.setDndMode(true);
     if (!dndOk) {
-      const msg = '[警告] 未能联系主程序开启勿扰模式（18790 端口无响应），'
+      const msg =
+          '[警告] 未能联系主程序开启勿扰模式（18790 端口无响应），'
           '念出唤醒词可能会误唤醒助手，建议重启语音助手后再试';
       widget.onLog?.call(msg);
       if (mounted) setState(() => _logs.add(msg));
@@ -362,15 +432,18 @@ class _EnrollDialogState extends State<_EnrollDialog> {
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E),
+                  color: AppColors.bg,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.shade800),
+                  border: Border.all(color: AppColors.borderBright),
                 ),
                 child: _logs.isEmpty
                     ? Center(
                         child: Text(
                           _isRunning ? '等待录入输出...' : '无输出',
-                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 12,
+                          ),
                         ),
                       )
                     : SingleChildScrollView(
@@ -381,7 +454,7 @@ class _EnrollDialogState extends State<_EnrollDialog> {
                           style: const TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 12,
-                            color: Color(0xFFE0E0E0),
+                            color: AppColors.consoleText,
                           ),
                         ),
                       ),

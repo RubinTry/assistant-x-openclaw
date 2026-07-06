@@ -16,5 +16,6 @@ imageio-ffmpeg>=0.4.9
 
 # OpenClaw 桥接
 requests>=2.28.0
+openai>=1.0.0
 websocket-client>=1.6.0   # WebSocket 桥 (import websocket)
 cryptography>=41.0.0      # WebSocket 桥设备签名 (Ed25519)

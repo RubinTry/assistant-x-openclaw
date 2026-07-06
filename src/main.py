@@ -55,6 +55,33 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": "assistant not ready"}).encode())
+        elif self.path in ("/heavy/add", "/heavy/remove"):
+            import heavy_store
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length else b""
+            try:
+                payload = json.loads(body)
+                pattern = (payload.get("pattern") or "").strip()
+            except Exception:
+                pattern = ""
+            if not pattern:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "missing pattern"}).encode())
+                return
+            if self.path == "/heavy/add":
+                added = heavy_store.add(pattern)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "ok", "added": added, "pattern": pattern}).encode())
+            else:
+                removed = heavy_store.remove(pattern)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "ok", "removed": removed, "pattern": pattern}).encode())
         elif self.path == "/dnd":
             _dnd_mode = True
             self.send_response(200)
@@ -72,6 +99,14 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
+        if self.path == "/heavy/list":
+            import heavy_store
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"patterns": heavy_store.list_all()}).encode())
+            return
+
         # 摄像头抓帧：抓一帧 JPEG 直接回给调用方（Hermes 用 curl -o 落地后交 vision_analyze）
         if self.path.startswith("/camera/snapshot"):
             import tempfile
@@ -173,6 +208,48 @@ from assistants import (
 # ── assistants.json 配置加载 ─────────────────────────────────
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ASSISTANTS_CFG_PATH = os.path.join(_PROJECT_DIR, "assistants.json")
+_ENV_PATH = os.path.join(_PROJECT_DIR, ".env")
+
+
+def _load_dotenv(path: str = _ENV_PATH):
+    """轻量加载 .env，不覆盖外部已设置的环境变量。"""
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
+    except Exception as e:
+        print(f"[配置] .env 加载失败（忽略）: {e}")
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        print(f"[配置] {name}={value!r} 无效，使用默认值 {default}")
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        print(f"[配置] {name}={value!r} 无效，使用默认值 {default}")
+        return default
+
+
+_load_dotenv()
 
 
 # ── 主脑引擎选择（assistants.json 顶层 engine 字段，默认 openclaw）──────────
@@ -190,6 +267,15 @@ def _load_overlay_debug() -> bool:
     try:
         with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
             return bool(json.load(f).get("overlay_debug_mode", False))
+    except Exception:
+        return False
+
+
+def _load_fast_mode() -> bool:
+    """读取 assistants.json 顶层 fastMode：true 时启用快路径分流。"""
+    try:
+        with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
+            return bool(json.load(f).get("fastMode", False))
     except Exception:
         return False
 
@@ -220,7 +306,7 @@ else:
 _SPEAKER_MODEL_PATH = os.path.join(_PROJECT_DIR, "models", "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx")
 _SPEAKER_DIR = os.path.join(_PROJECT_DIR, "data", "enrollment")
 _SPEAKER_FILE = os.path.join(_SPEAKER_DIR, "speakers.json")
-_SPEAKER_THRESHOLD = 0.55  # 声纹相似度阈值
+_SPEAKER_THRESHOLD = _env_float("VOICE_ASSISTANT_SPEAKER_THRESHOLD", 0.55)  # 声纹相似度阈值
 _SPEAKER_NOTIFY_PORT = 18792  # control_center TCP 通知端口
 
 # 音频流假死看门狗：macOS CoreAudio 在反复关停/重开 InputStream 后偶发
@@ -596,7 +682,7 @@ class VoiceAssistant:
         self.audio_queue = queue.Queue()
         self.stop_event = threading.Event()
         self.last_voice_time = time.time()
-        self.idle_timeout = 30
+        self.idle_timeout = _env_float("VOICE_ASSISTANT_IDLE_TIMEOUT_SECONDS", 30.0)
         self.last_activity_time = time.time()
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
         self._wake_buffer_max_samples = int(self._asr_rate * 3)  # 最多存3秒（16kHz）
@@ -617,16 +703,36 @@ class VoiceAssistant:
 
         self._is_openclaw_busy = False
         self._is_processing = False  # True: 从指令发出到TTS播报完毕的全流程
+        self._processing_turn_id = 0
+        self._processing_turn_lock = threading.Lock()
         self._openclaw_request_active = threading.Event()
         self._stop_openclaw_request = threading.Event()
         self._ignore_next_result = False
         self._suppress_recognition_until_tts_done = False
+        # 唤醒待决策：退下后台任务仍在跑时，唤醒不主动接续，改问"要不要继续"。
+        # 置位后，下一句用户话被当作 是/否 决策处理（见 _on_recognized 开头）。
+        self._pending_resume_decision = False
         self._last_diag_log = 0.0  # 监听循环诊断日志节流时间戳（文件级，不进控制中心）
         self._last_interrupt_time = 0  # 记录上次打断时间，用于防止误触发
         self._last_wake_time = 0  # 记录上次唤醒时间，唤醒后保护期内跳过退出检测
         self._keyword_stream_reset_event = (
             threading.Event()
         )  # 用于通知主循环重置 keyword_stream
+        # 打断词 spotter（分流方案 B）：播放期只用"打断词"触发 barge-in，避免助手
+        # 自己的 TTS 回声命中唤醒词把自己切断。按当前助手异步加载 keywords/interrupt/<id>.txt。
+        self._interrupt_spotter = None
+        self._interrupt_spotter_id = None
+        # 启动时按 assistants.json 的 interrupt_words 自动生成打断词文件（中英双语），
+        # 唤醒对应助手时再加载。改 assistants.json 后重启即生效，无需手动跑脚本。
+        try:
+            from interrupt_keywords import generate_all
+            _gen = generate_all(
+                _PROJECT_DIR, os.path.dirname(self.args.kws_tokens), verbose=True
+            )
+            if _gen:
+                print(f"[打断词] 启动自动生成: {_gen}")
+        except Exception as e:  # noqa: BLE001 — 生成失败不拖垮启动
+            print(f"[打断词] 启动生成失败（忽略）: {e}")
 
         self.keyword_spotter = self._create_keyword_spotter()
         # 始终创建流式识别器（用于连续对话模式）
@@ -1076,6 +1182,8 @@ class VoiceAssistant:
     def _init_openclaw(self):
         """初始化 OpenClaw bridge"""
         assistant_id = self.current_cfg["id"]
+        # 按当前助手异步加载打断词 spotter（启动与切换都经过这里）
+        self._load_interrupt_spotter_async(assistant_id)
         if self.openclaw:
             # 如果有旧的，先发送停止，再关闭其 WebSocket 长连接（避免切换时连接泄漏）
             self.openclaw.send_stop_command()
@@ -1090,13 +1198,19 @@ class VoiceAssistant:
         self.openclaw.precheck_async()
 
         # 快路径（分流第一线）：直连 Control Center 配置的快模型。
-        # 未配置模型表时 is_available()=False，_route_stream 自动全走 agent，零行为变化。
+        # fastMode=false 或未配置模型表时，_route_stream 自动全走 agent。
+        if not _load_fast_mode():
+            self._fast_path = None
+            print("[分流] fastMode=false，快路径已关闭（全走 agent）")
+            return
+
         try:
             from fast_path import FastPathClient
             engine = _load_engine()
             self._fast_path = FastPathClient(
                 should_stop=self._stop_openclaw_request.is_set,
                 agent_name=self.current_cfg.get("name") or assistant_id,
+                agent_id=assistant_id,
             )
             # 人设跟随当前引擎 + 当前角色：从 SOUL 文件取精简人格注入快路径，
             # 让闲聊也像 jarvis / 林妹妹本人（openclaw 与 hermes 各自 SOUL 位置不同）。
@@ -1194,6 +1308,65 @@ class VoiceAssistant:
                 num_trailing_blanks=2,
                 provider="cpu",
             )
+
+    def _interrupt_keywords_path(self, assistant_id):
+        return os.path.join(
+            _PROJECT_DIR, "keywords", "interrupt", f"{assistant_id}.txt"
+        )
+
+    def _create_spotter_from_file(self, keywords_file):
+        """用指定关键词文件构建 KWS spotter（复用唤醒词 spotter 的模型参数）。
+        文件缺失/为空/构建失败返回 None。"""
+        if not keywords_file or not os.path.exists(keywords_file):
+            return None
+        try:
+            if os.path.getsize(keywords_file) == 0:
+                return None
+        except OSError:
+            return None
+        for provider in (self.args.provider, "cpu"):
+            try:
+                return sherpa_onnx.KeywordSpotter(
+                    tokens=self.args.kws_tokens,
+                    encoder=self.args.kws_encoder,
+                    decoder=self.args.kws_decoder,
+                    joiner=self.args.kws_joiner,
+                    num_threads=1,
+                    keywords_file=keywords_file,
+                    keywords_score=self.args.keywords_score,
+                    keywords_threshold=self.args.keywords_threshold,
+                    max_active_paths=8,
+                    num_trailing_blanks=2,
+                    provider=provider,
+                )
+            except Exception as e:  # noqa: BLE001
+                print(f"[打断词] provider={provider} 构建失败: {e}")
+        return None
+
+    def _load_interrupt_spotter_async(self, assistant_id):
+        """异步加载指定助手的打断词 spotter（方案 B）。
+
+        同一助手已加载则跳过；切换助手时立即失效旧的，后台加载新的；无打断词文件
+        则置空（该助手播放期不支持语音打断）。异步以免拖慢唤醒/切换。
+        """
+        if assistant_id == self._interrupt_spotter_id:
+            return
+        self._interrupt_spotter_id = assistant_id
+        self._interrupt_spotter = None  # 立即失效旧的，避免播放期误用别的助手打断词
+        path = self._interrupt_keywords_path(assistant_id)
+
+        def _load():
+            spotter = self._create_spotter_from_file(path)
+            # 加载期间若又切换了助手，丢弃本次结果
+            if self._interrupt_spotter_id != assistant_id:
+                return
+            self._interrupt_spotter = spotter
+            if spotter is not None:
+                print(f"[打断词] 已加载 {assistant_id} 的打断词: {path}")
+            else:
+                print(f"[打断词] {assistant_id} 无打断词文件，播放期不支持语音打断: {path}")
+
+        threading.Thread(target=_load, daemon=True).start()
 
     def _create_recognizer(self):
         """创建语音识别器"""
@@ -1440,7 +1613,7 @@ class VoiceAssistant:
         if status:
             print(status)
         # 始终入队音频，保证处理期间（含TTS播报）也能检测唤醒词打断
-        if self.audio_queue.qsize() < 100:
+        if self.audio_queue.qsize() < _env_int("VOICE_ASSISTANT_AUDIO_QUEUE_MAXSIZE", 100):
             self.audio_queue.put(indata.copy())
 
     def _clear_queue(self):
@@ -1546,6 +1719,11 @@ class VoiceAssistant:
             else:
                 print("[VAD] VAD 流创建失败，待机时将不使用预检测")
 
+        # 打断词流（方案 B）：与 self._interrupt_spotter 配对的本地流，spotter 异步
+        # 变更时重建。仅在本音频线程内创建/解码，避免跨线程用同一个流。
+        _interrupt_spotter_ref = None
+        _interrupt_stream = None
+
         while not self.stop_event.is_set():
             try:
                 # 检查是否需要重置 keyword_stream（由 exit_standby 触发）
@@ -1586,32 +1764,39 @@ class VoiceAssistant:
                     self.last_activity_time = time.time()
                     samples = audio_data.reshape(-1)
                     asr_samples = self._resample_for_asr(samples)
-                    keyword_stream.accept_waveform(self._asr_rate, asr_samples)
 
-                    while self.keyword_spotter.is_ready(keyword_stream):
-                        self.keyword_spotter.decode_stream(keyword_stream)
-                        kw_result = self.keyword_spotter.get_result(keyword_stream)
-                        if kw_result:
-                            detected_id = self._detect_assistant_from_keyword(kw_result)
-                            if detected_id != self.current_cfg["id"]:
-                                continue
-                            print(f"\n[打断] 检测到唤醒词: {kw_result}")
-                            # 打断整个处理流程：停止TTS + 中断OpenClaw
-                            stop_tts()
-                            self._interrupt_openclaw()
-                            # 保持唤醒状态，允许直接继续说话
-                            self.is_awake = True
-                            self.continuous_mode = True
-                            # 打断后重置空闲计时：否则 silence_duration 仍是打断前
-                            # 的陈旧值（任务可能已执行数十秒），会立即触发 30s 空闲超时退出
-                            self.last_voice_time = time.time()
-                            # 重置识别器，准备接收新指令
-                            recognition_stream = self.recognizer.create_stream()
-                            recognition_result = ""
-                            self.keyword_spotter.reset_stream(keyword_stream)
-                            keyword_stream = self.keyword_spotter.create_stream()
-                            print("\n请说出指令...")
-                            break
+                    # 方案 B：播放期只用"打断词"触发 barge-in，不喂唤醒词 KWS——
+                    # 避免助手自己的 TTS 回声命中唤醒词、把自己念到一半切断。
+                    # 打断 spotter 由唤醒/切换时异步加载；配对的流随 spotter 变化重建。
+                    cur_spotter = self._interrupt_spotter
+                    if cur_spotter is not _interrupt_spotter_ref:
+                        _interrupt_spotter_ref = cur_spotter
+                        _interrupt_stream = (
+                            cur_spotter.create_stream() if cur_spotter is not None else None
+                        )
+
+                    if cur_spotter is not None and _interrupt_stream is not None:
+                        _interrupt_stream.accept_waveform(self._asr_rate, asr_samples)
+                        while cur_spotter.is_ready(_interrupt_stream):
+                            cur_spotter.decode_stream(_interrupt_stream)
+                            hit = cur_spotter.get_result(_interrupt_stream)
+                            if hit:
+                                print(f"\n[打断] 检测到打断词: {hit}")
+                                # 打断整个处理流程：停止TTS + 中断OpenClaw
+                                stop_tts()
+                                self._interrupt_openclaw()
+                                # 保持唤醒状态，允许直接继续说话
+                                self.is_awake = True
+                                self.continuous_mode = True
+                                # 打断后重置空闲计时，避免立即触发 30s 空闲超时退出
+                                self.last_voice_time = time.time()
+                                # 重置识别器与打断流，准备接收新指令
+                                recognition_stream = self.recognizer.create_stream()
+                                recognition_result = ""
+                                cur_spotter.reset_stream(_interrupt_stream)
+                                _interrupt_stream = cur_spotter.create_stream()
+                                print("\n请说出指令...")
+                                break
 
                     self._clear_queue()
                     continue
@@ -1777,13 +1962,22 @@ class VoiceAssistant:
                             self.visual.show_wake_effect()
                             # 唤醒后发"voice-assistant-wake-up"给后端引擎，由引擎返回
                             # 问候播报。改为在线程里跑 + 立即恢复音频流，支持唤醒后打断。
-                            _wake_ts = time.strftime("%Y-%m-%d %H:%M:%S")
-                            wake_thread = threading.Thread(
-                                target=self._on_recognized,
-                                args=(f"voice-assistant-wake-up-{_wake_ts}",),
-                                daemon=True,
-                            )
-                            wake_thread.start()
+                            # 例外：退下时软停的后台任务仍在跑 → 不发问候（问候会让模型
+                            # 顺着 session 里的未完成任务继续），改问"要不要继续"，
+                            # 下一句话按 是/否 决策处理（见 _on_recognized）。
+                            if self._has_inflight_task():
+                                self._ask_resume_decision()
+                            else:
+                                # 清掉可能残留的待决策标志（上次问了没答就睡了），
+                                # 否则问候标记会被误判成 是/否 回答。
+                                self._pending_resume_decision = False
+                                _wake_ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                                wake_thread = threading.Thread(
+                                    target=self._on_recognized,
+                                    args=(f"voice-assistant-wake-up-{_wake_ts}",),
+                                    daemon=True,
+                                )
+                                wake_thread.start()
 
                             # 唤醒线程在后台跑，主循环恢复音频流后检测打断。
                             # 返回后必须复位 suppress（它在上方 1597 行附近被置 True），否则
@@ -1896,7 +2090,10 @@ class VoiceAssistant:
                             self.continuous_mode,
                         )
 
-                    if _ep or (recognition_result and silence_duration > 1.5):
+                    if _ep or (
+                        recognition_result
+                        and silence_duration > _env_float("VOICE_ASSISTANT_SILENCE_DURATION_SECONDS", 1.5)
+                    ):
                         if recognition_result:
                             should_suppress = self._suppress_recognition_until_tts_done
 
@@ -1990,7 +2187,7 @@ class VoiceAssistant:
                             if self.continuous_mode and not exit_continuous:
                                 recognition_result = ""
                                 recognition_stream = self.recognizer.create_stream()
-                                print("\n请继续说出指令...")
+                                # 不再打印提示——_on_recognized 回复完成后会统一提示用户
                             else:
                                 if not self._is_openclaw_busy:
                                     self.visual.hide_effects()
@@ -2041,12 +2238,15 @@ class VoiceAssistant:
         stop_audio_stream()
 
     def _interrupt_openclaw(self):
-        """执行打断操作：发送 /stop、取消当前请求、停止 TTS"""
-        print("\n[打断] 检测到唤醒词，执行打断...")
-        # 发送 /stop 命令（异步）
+        """执行打断操作：软停止（断点续传），不中断后台任务。
+
+        打断时只停 TTS 播报和流式回调，SSE 连接保持不断开。
+        浏览器等后台资源继续运行，由 idle reaper 在超时后自动回收。
+        快路径识别到「中断任务」意图时，改调 _cancel_task()。
+        """
+        print("\n[打断] 检测到唤醒词，执行软停止（断点续传）...")
+        # 软停止：标记请求已停止，TTS 静默，但不断开 SSE 连接
         self.openclaw.send_stop_command()
-        # 取消当前请求（同步标记）
-        self.openclaw.cancel_current_request()
         # 设置停止标志，用于阻塞等待循环
         self._stop_openclaw_request.set()
         # 立即重置状态，确保可以重新唤醒
@@ -2059,13 +2259,32 @@ class VoiceAssistant:
         stop_tts()
         # 记录打断时间，用于防止后续误触发退出检测
         self._last_interrupt_time = time.time()
-        print("[打断] 已发出中断信号，状态已重置")
+        print("[打断] 软停止完成，后台任务继续运行")
+
+    def _cancel_task(self):
+        """硬取消任务：快路径识别到「中断任务」意图时调用。
+
+        断开 SSE 连接，触发 agent.interrupt()，浏览器等后台资源
+        会被清理。用于用户明确要求取消任务。
+        """
+        print("\n[取消任务] 快路径识别到中断任务意图，执行硬取消...")
+        self.openclaw.cancel_task()
+        self._stop_openclaw_request.set()
+        self._is_openclaw_busy = False
+        self._is_processing = False
+        self.continuous_mode = False
+        if hasattr(self, "_waiting_active"):
+            self._waiting_active.clear()
+        stop_tts()
+        self._last_interrupt_time = time.time()
+        print("[取消任务] 硬取消完成，后台资源将被清理")
 
     def _interrupt_openclaw_silent(self):
-        """静默中断：仅取消请求和重置状态，不发送 /stop 命令
-        用于 exit_standby 等已经明确要退出的场景，避免重复发送 /stop
+        """静默软停止：退下时调用，不断开连接。
+
+        仅标记请求已软停、重置状态、停 TTS。后台任务继续运行。
         """
-        self.openclaw.cancel_current_request()
+        self.openclaw.send_stop_command()  # 软停止，不断开 SSE
         self._stop_openclaw_request.set()
         self._is_openclaw_busy = False
         self._is_processing = False
@@ -2084,7 +2303,8 @@ class VoiceAssistant:
         except Exception as e:
             print(f"[OpenClaw] 发送 /clear 失败: {e}")
 
-    def _route_stream(self, text, on_chunk=None, on_start=None, on_end=None):
+    def _route_stream(self, text, on_chunk=None, on_start=None, on_end=None,
+                      on_tool_call=None):
         """分流：快模型第一线，重消息 tool call 升级到 agent。
 
         与桥 send_and_wait_stream 同签名/同回调契约——TTS 流水线、等待音、结果处理
@@ -2114,10 +2334,90 @@ class VoiceAssistant:
         # 重路径：agent 桥（openclaw / hermes），保持原有行为不变
         return self.openclaw.send_and_wait_stream(
             text, on_chunk=on_chunk, on_start=on_start, on_end=on_end,
+            on_tool_call=on_tool_call,
         )
+
+    # ── 唤醒待决策：退下后台任务续做/搁置 ──────────────────────────
+
+    def _has_inflight_task(self) -> bool:
+        """当前桥是否有"被软停但后台仍在跑"的任务。仅 hermes 桥支持，其余退化为 False。"""
+        fn = getattr(self.openclaw, "has_inflight_task", None)
+        try:
+            return bool(fn()) if callable(fn) else False
+        except Exception:  # noqa: BLE001 — 检测失败一律退化为"无在跑任务"，走正常问候
+            return False
+
+    def _ask_resume_decision(self):
+        """唤醒时发现后台任务在跑：不发问候，改问是否继续，置待决策标志。
+
+        同步播报（此刻音频流已停，见主循环 stop_audio_stream→start_audio_stream 区间），
+        问话期间不会被自身回声误识别；播报完主循环恢复音频流，用户下一句即答案。
+        """
+        self._pending_resume_decision = True
+        self._last_wake_time = time.time()  # 保护期，避免问话回声误触发退出检测
+        hint = ""
+        fn = getattr(self.openclaw, "pending_task_hint", None)
+        if callable(fn):
+            try:
+                hint = (fn() or "").strip()
+            except Exception:  # noqa: BLE001
+                hint = ""
+        print(f"[待决策] 后台任务在跑（{hint[:40] or '未知'}），询问是否继续...")
+        try:
+            text_to_speech_play("先生，刚才那件事还没忙完。要我接着做吗？")
+        except Exception as e:  # noqa: BLE001 — 播报失败不影响后续决策监听
+            print(f"[待决策] 询问播报失败（忽略）: {e}")
+
+    @staticmethod
+    def _classify_resume_reply(text: str) -> str:
+        """把用户对"要不要继续"的回答分成 resume / abandon / new_command。
+
+        规则（保守，避免误判）：
+          - 含明确否定词 → 纯短否定当 abandon，否定+其它内容当 new_command；
+          - 含"继续/接着" → resume；极短肯定词（≤3字：要/好/是/对/嗯/行）→ resume；
+          - 其余（既不像肯定也不像否定）→ new_command（顺带搁置旧任务）。
+        """
+        t = (text or "").strip()
+        if not t:
+            return "abandon"
+        low = t.lower()
+        no_words = ("不用", "不要", "别", "算了", "取消", "停", "no", "stop", "cancel")
+        if any(k in low for k in no_words) or t in ("不", "不了"):
+            return "abandon" if len(t) <= 4 else "new_command"
+        if "继续" in t or "接着" in t or low in ("yes", "continue", "go on"):
+            return "resume"
+        if len(t) <= 3 and any(k in low for k in ("要", "好", "是", "对", "嗯", "行", "ok")):
+            return "resume"
+        return "new_command"
+
+    def _abandon_previous_task(self):
+        """标记搁置上一任务：后台悄声跑完，但注入提示阻止模型再主动接续。"""
+        fn = getattr(self.openclaw, "mark_previous_task_abandoned", None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _on_recognized(self, text: str):
         """识别结果 → 发送给 OpenClaw → 整体合成播报回复"""
+        # 唤醒待决策：上一句问了"要不要继续"，这句就是回答。
+        if self._pending_resume_decision:
+            self._pending_resume_decision = False
+            decision = self._classify_resume_reply(text)
+            print(f"[待决策] 回答={text!r} → {decision}")
+            if decision == "resume":
+                text = "接着刚才的任务，继续。"  # 走正常 turn，引擎靠 session 上下文接续
+            elif decision == "abandon":
+                self._abandon_previous_task()
+                try:
+                    text_to_speech_play("好的，先生。那件事先搁一边。")
+                except Exception:  # noqa: BLE001
+                    pass
+                return  # 本轮不发引擎
+            else:  # new_command：搁置旧任务，把这句当新指令发引擎
+                self._abandon_previous_task()
+
         print(f"\n[→ OpenClaw] {text}")
 
         # 在发送给 OpenClaw 之前的一瞬间，还原特效大小
@@ -2125,8 +2425,11 @@ class VoiceAssistant:
 
         print("◈ 正在思考...", end="", flush=True)
 
-        self._is_processing = True  # 标记全流程：指令发出→OpenClaw回复→TTS播报完毕
-        self._is_openclaw_busy = True
+        with self._processing_turn_lock:
+            self._processing_turn_id += 1
+            turn_id = self._processing_turn_id
+            self._is_processing = True  # 标记全流程：指令发出→OpenClaw回复→TTS播报完毕
+            self._is_openclaw_busy = True
         self._stop_openclaw_request.clear()
         self._openclaw_request_active.set()
 
@@ -2182,7 +2485,11 @@ class VoiceAssistant:
                     # 长句/长段落不一次性整段合成：每 4 句切一批。
                     # 在锁内分配 seq 并入队，保证多线程（chunk 回调 + flusher）
                     # 并发调用时切片顺序不乱。
-                    for batch in _batch_sentences(seg, _TTS_SENT_END, 4):
+                    for batch in _batch_sentences(
+                        seg,
+                        _TTS_SENT_END,
+                        _env_int("VOICE_ASSISTANT_TTS_MAX_SENTENCES", 4),
+                    ):
                         if not batch.strip():
                             continue
                         seq = seq_ctr["n"]
@@ -2304,12 +2611,28 @@ class VoiceAssistant:
                     if not stop_requested.is_set():
                         self._waiting_active.clear()
 
+                def _on_stream_tool_call(name, args):
+                    # 模型只发 tool_use、无文本时 on_start 不会触发，on_end 会把
+                    # waiting 提示音关掉，导致工具执行的数秒里纯静默（用户感知为
+                    # "0 回复"）。这里在工具调用时重新拉起 waiting 音，堵住静默窗口，
+                    # 直到下一段文本到来（_on_stream_start 再关掉它）。
+                    if self._stop_openclaw_request.is_set():
+                        return
+                    if received_chunks:
+                        return  # 已经开口说过话，无需提示音兜底
+                    if not self._waiting_active.is_set():
+                        self._waiting_active.set()
+                        threading.Thread(
+                            target=_waiting_sound_loop, daemon=True
+                        ).start()
+
                 try:
                     reply = self._route_stream(
                         text,
                         on_chunk=_on_stream_chunk,
                         on_start=_on_stream_start,
                         on_end=_on_stream_end,
+                        on_tool_call=_on_stream_tool_call,
                     )
                     self._waiting_active.clear()
                     waiting_thread.join(timeout=0.5)
@@ -2318,8 +2641,10 @@ class VoiceAssistant:
                     self._waiting_active.clear()
                     result_queue.put(("error", str(e)))
                 finally:
-                    self._is_openclaw_busy = False
-                    self._openclaw_request_active.clear()
+                    with self._processing_turn_lock:
+                        if self._processing_turn_id == turn_id:
+                            self._is_openclaw_busy = False
+                            self._openclaw_request_active.clear()
 
             request_thread = threading.Thread(target=_openclaw_request, daemon=True)
             request_thread.start()
@@ -2330,9 +2655,8 @@ class VoiceAssistant:
                     break
                 except queue.Empty:
                     if self._stop_openclaw_request.is_set():
-                        self.openclaw.send_stop_command()
-                        self.openclaw.cancel_current_request()
-                        print("\n[打断] OpenClaw 请求已中断")
+                        self.openclaw.send_stop_command()  # 软停止，不断开 SSE
+                        print("\n[打断] OpenClaw 请求已软停止")
                         return
 
             if status == "success":
@@ -2356,12 +2680,18 @@ class VoiceAssistant:
                         print("\n[打断] TTS播报被中断，跳过收尾音效")
                         return
 
-                    print("◈ 继续说吧，我在听着...", flush=True)
-                    self.jarvis.play_sound("continue")
+                    # 只在仍然处于连续对话模式时才提示继续
+                    if self.continuous_mode:
+                        print("◈ 继续说吧，我在听着...", flush=True)
+                        self.jarvis.play_sound("continue")
                     return
                 else:
                     print("\n[← OpenClaw] (无回复)")
                     self.jarvis.on_error("无回复")
+                    # 空回复时也根据连续对话状态给提示
+                    if self.continuous_mode:
+                        print("◈ 继续说吧，我在听着...", flush=True)
+                        self.jarvis.play_sound("continue")
             else:
                 print(f"[OpenClaw] 异常: {data}")
                 self.jarvis.on_error(data)
@@ -2380,8 +2710,10 @@ class VoiceAssistant:
             except Exception:
                 pass
             self.last_voice_time = time.time()
-            self._is_processing = False
-            self._is_openclaw_busy = False
+            with self._processing_turn_lock:
+                if self._processing_turn_id == turn_id:
+                    self._is_processing = False
+                    self._is_openclaw_busy = False
 
     def run(self):
         """运行语音助手"""
@@ -2406,6 +2738,8 @@ class VoiceAssistant:
             print("[exit_standby] 已在待机状态，跳过")
             return
         print("\n[收到退下信号]")
+        # 退下即取消未答完的"是否继续"待决策，避免下次唤醒串状态。
+        self._pending_resume_decision = False
         # 使用静默中断，避免重复发送 /stop 命令
         self._interrupt_openclaw_silent()
         # self._clear_openclaw_context()
@@ -2667,6 +3001,14 @@ def main():
 
     setup_logging(_PROJECT_DIR)
 
+    # 单例收敛必须在任何慢初始化（模型加载 / 打断词生成 / 桥接预检）之前完成：
+    # 进程一起来就先杀掉旧实例并抢占 PID 文件，把重启竞态窗口压到最小——否则
+    # 两个新进程可能同时卡在慢构造里、都读到旧(已死)PID、都判无需杀、都写 PID，
+    # 双双存活（"重启出现 2 个进程"的根因）。
+    _enforce_single_instance()
+    with open(PID_FILE, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+
     args = get_args()
 
     # 加载所有 assistant 配置
@@ -2717,9 +3059,7 @@ def main():
     api_thread.start()
     print(f"API server started on port {API_PORT}")
 
-    _enforce_single_instance()
-    with open(PID_FILE, "w", encoding="utf-8") as f:
-        f.write(str(os.getpid()))
+    # 单例收敛 + PID 抢占已在 main() 顶部完成（慢构造之前），此处不再重复。
 
     try:
         assistant.run()

@@ -10,18 +10,23 @@
 
 探针只用一次最小请求，测的是"能力"而非"意愿"——挂一个 handoff 工具 + 强制
 tool_choice，看端点/模型能否吐出合规的 tool_calls。判读逻辑（interpret_probe）
-是纯函数，可离线单测；网络部分（probe_model）用 requests，避免引入新依赖。
-
-用 requests 直连 {base_url}/chat/completions（OpenAI 标准），不经过 openai SDK——
-venv 未装 openai，且仓库既有桥（openclaw_bridge.py）也是 requests 风格。
+是纯函数，可离线单测；网络部分（probe_model）用 OpenAI Python SDK，与运行期
+快路径保持同一套 OpenAI-compatible 语义。
 """
 
 import json
+import os
+import shutil
 
 try:
-    import requests as _requests
-except Exception:  # pragma: no cover - requests 是既有依赖，理论上恒在
-    _requests = None
+    from openai import OpenAI as _OpenAI
+except Exception:  # pragma: no cover
+    _OpenAI = None
+
+try:
+    import httpx as _httpx
+except Exception:  # pragma: no cover
+    _httpx = None
 
 # 校验用的 handoff 工具 schema。与后续快路径真正下发给模型的应保持一致
 # （单一事实源：真正接快路径时从这里 import）。
@@ -48,14 +53,58 @@ HANDOFF_TOOL = {
 
 _PROBE_MESSAGES = [
     {
+        "role": "system",
+        "content": (
+            "You are validating tool-calling support. You must call the "
+            "handoff_to_agent tool. Do not answer in text."
+        ),
+    },
+    {
         "role": "user",
-        "content": "Hand this task off to the agent: search the web for today's news.",
+        "content": "Search the web for today's news. This requires handoff.",
     }
 ]
 
 
-def _chat_url(base_url: str) -> str:
-    return base_url.rstrip("/") + "/chat/completions"
+def is_codex_provider(provider: str) -> bool:
+    return (provider or "").strip().lower() == "openai-codex"
+
+
+def probe_codex_model(model: str) -> dict:
+    """Validate the local Codex CLI auth path for the no-API-key provider."""
+    res = {
+        "ok": False,
+        "reachable": False,
+        "auth_ok": False,
+        "model_ok": bool((model or "").strip()),
+        "tool_support": True,
+        "message": "",
+    }
+    codex = shutil.which("codex")
+    if not codex:
+        app_codex = "/Applications/Codex.app/Contents/Resources/codex"
+        if os.path.exists(app_codex):
+            codex = app_codex
+    if not codex:
+        res["message"] = "未找到 Codex CLI（codex 命令不可用）"
+        return res
+
+    auth_path = os.path.expanduser(os.path.join(os.environ.get("CODEX_HOME", "~/.codex"), "auth.json"))
+    if not os.path.exists(auth_path):
+        res["reachable"] = True
+        res["message"] = "未检测到 Codex 登录态，请先运行 codex login 或打开 Codex 登录"
+        return res
+
+    res.update(
+        ok=bool((model or "").strip()),
+        reachable=True,
+        auth_ok=True,
+        tool_support=True,
+        message="Codex CLI 登录态可用 ✓",
+    )
+    if not res["model_ok"]:
+        res["message"] = "Model 必填"
+    return res
 
 
 def interpret_probe(status, body, exc=None, forced=True) -> dict:
@@ -135,25 +184,37 @@ def interpret_probe(status, body, exc=None, forced=True) -> dict:
     return res
 
 
-def probe_model(base_url: str, model: str, api_key: str, timeout: float = 12.0) -> dict:
+def probe_model(base_url: str, model: str, api_key: str, timeout: float = 12.0,
+                provider: str = "") -> dict:
     """对单个模型跑一次能力探针。返回 interpret_probe 的结论 dict。
 
     tool_choice 采用"强制对象形式 → required → auto"的降级阶梯，
     以兼容不同 provider 对 tool_choice 的支持差异，避免误判为不支持。
     """
-    if _requests is None:
+    if is_codex_provider(provider):
+        return probe_codex_model(model)
+
+    if _OpenAI is None:
         return {"ok": False, "reachable": False, "auth_ok": False,
                 "model_ok": False, "tool_support": False,
-                "message": "requests 模块不可用，无法校验"}
+                "message": "openai 模块不可用，无法校验"}
 
-    url = _chat_url(base_url)
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    sdk_timeout = (
+        _httpx.Timeout(timeout, connect=min(6.0, timeout))
+        if _httpx is not None else timeout
+    )
+    client = _OpenAI(
+        api_key=api_key,
+        base_url=base_url.rstrip("/"),
+        timeout=sdk_timeout,
+    )
     base_payload = {
         "model": model,
         "messages": _PROBE_MESSAGES,
         "tools": [HANDOFF_TOOL],
-        "max_tokens": 64,
-        "stream": False,
+        # Some local reasoning models emit a sizeable reasoning trace before the
+        # actual tool call. Keep this high enough to avoid false negatives.
+        "max_tokens": 512,
         "temperature": 0,
     }
 
@@ -169,15 +230,14 @@ def probe_model(base_url: str, model: str, api_key: str, timeout: float = 12.0) 
         payload = dict(base_payload, tool_choice=tc)
         forced = tc != "auto"
         try:
-            r = _requests.post(url, headers=headers, json=payload, timeout=timeout)
+            resp = client.chat.completions.create(**payload)
         except Exception as e:  # noqa: BLE001 — 连接层异常统一判不可达
-            return interpret_probe(None, None, exc=e)
-        try:
-            body = r.json()
-        except (ValueError, json.JSONDecodeError):
-            body = {"error": {"message": (r.text or "")[:300]}}
-
-        result = interpret_probe(r.status_code, body, forced=forced)
+            status = getattr(e, "status_code", None)
+            if status is None:
+                return interpret_probe(None, None, exc=e)
+            result = interpret_probe(status, _sdk_error_body(e), forced=forced)
+        else:
+            result = interpret_probe(200, _sdk_completion_body(resp), forced=forced)
         last = result
 
         # 明确成功 / 明确鉴权或模型问题 → 立即返回，不再降级
@@ -186,8 +246,42 @@ def probe_model(base_url: str, model: str, api_key: str, timeout: float = 12.0) 
         # 若失败原因是 tool_choice 本身不被支持，降级再试；否则直接返回
         low = result["message"].lower()
         tool_choice_rejected = ("tool_choice" in low) or ("tool choice" in low)
-        if not tool_choice_rejected:
+        no_tool_calls = "未产生 tool_calls" in result["message"]
+        if not tool_choice_rejected and not no_tool_calls:
             return result
-        # 否则继续 ladder 下一档
+        # 否则继续 ladder 下一档。即使某档 200 但没产生 tool_calls，也继续
+        # 尝试后续模式，避免 provider 对 tool_choice 某个取值静默忽略造成误判。
 
     return last
+
+
+def _sdk_completion_body(resp) -> dict:
+    """把 SDK completion 对象转成 interpret_probe 期望的最小 OpenAI JSON 形状。"""
+    try:
+        if hasattr(resp, "model_dump"):
+            return resp.model_dump()
+    except Exception:
+        pass
+    choices = []
+    for ch in (getattr(resp, "choices", None) or []):
+        msg = getattr(ch, "message", None)
+        tool_calls = getattr(msg, "tool_calls", None) if msg is not None else None
+        choices.append({"message": {"tool_calls": tool_calls}})
+    return {"choices": choices}
+
+
+def _sdk_error_body(exc) -> dict:
+    """尽量从 OpenAI SDK 异常里还原 error.message，供 interpret_probe 复用。"""
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        try:
+            return resp.json()
+        except Exception:
+            try:
+                return {"error": {"message": (resp.text or "")[:300]}}
+            except Exception:
+                pass
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        return body
+    return {"error": {"message": str(exc)}}
