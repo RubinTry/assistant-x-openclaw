@@ -28,13 +28,35 @@ abstract final class AppColors {
   static const textMuted = Color(0xFF62798C);
 
   // ── 控制台 ─────────────────────────────────────────
-  static const consoleText = Color(0xFFD8F6FF);
-  static const consoleSelection = Color(0x5538D8FF);
+  static const consoleText = Color(0xFF62E8FF);
+  static const consoleTextHot = Color(0xFFB9FAFF);
+  static const consoleGlow = Color(0xFF22C7FF);
+  static const consoleSelection = Color(0x6638D8FF);
 }
 
 abstract final class AppShape {
   static const radius = 8.0;
   static final borderRadius = BorderRadius.circular(radius);
+}
+
+abstract final class AppControl {
+  static const minButtonHeight = 44.0;
+  static const minButtonWidth = 96.0;
+  static const iconButtonSize = 40.0;
+}
+
+abstract final class AppTextStyles {
+  static const consoleLed = TextStyle(
+    fontFamily: 'monospace',
+    fontSize: 12,
+    height: 1.5,
+    letterSpacing: 0,
+    color: AppColors.consoleText,
+    // shadows: [
+    //   Shadow(color: AppColors.consoleTextHot, blurRadius: 1.4),
+    //   Shadow(color: AppColors.consoleGlow, blurRadius: 7),
+    // ],
+  );
 }
 
 abstract final class AppGradients {
@@ -103,8 +125,29 @@ ThemeData buildAppTheme() {
         backgroundColor: AppColors.accent,
         foregroundColor: const Color(0xFF021018),
         shape: RoundedRectangleBorder(borderRadius: AppShape.borderRadius),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        minimumSize: const Size(
+          AppControl.minButtonWidth,
+          AppControl.minButtonHeight,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        iconSize: 19,
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+      ),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.accent,
+        foregroundColor: const Color(0xFF021018),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: AppShape.borderRadius),
+        minimumSize: const Size(
+          AppControl.minButtonWidth,
+          AppControl.minButtonHeight,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        iconSize: 19,
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -112,12 +155,34 @@ ThemeData buildAppTheme() {
         foregroundColor: AppColors.textSecondary,
         side: const BorderSide(color: AppColors.borderBright),
         shape: RoundedRectangleBorder(borderRadius: AppShape.borderRadius),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        minimumSize: const Size(
+          AppControl.minButtonWidth,
+          AppControl.minButtonHeight,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+        iconSize: 19,
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
+      style: TextButton.styleFrom(
+        foregroundColor: AppColors.textSecondary,
+        minimumSize: const Size(76, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        shape: RoundedRectangleBorder(borderRadius: AppShape.borderRadius),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        minimumSize: const Size(
+          AppControl.iconButtonSize,
+          AppControl.iconButtonSize,
+        ),
+        padding: const EdgeInsets.all(10),
+        shape: RoundedRectangleBorder(borderRadius: AppShape.borderRadius),
+        foregroundColor: AppColors.textSecondary,
+      ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       isDense: true,
@@ -244,38 +309,46 @@ class StatusPill extends StatelessWidget {
   final bool active;
   final String activeText;
   final String inactiveText;
+  final bool compact;
 
   const StatusPill({
     super.key,
     required this.active,
     this.activeText = '运行中',
     this.inactiveText = '已停止',
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final color = active ? AppColors.success : AppColors.textMuted;
+    final dotSize = compact ? 6.0 : 7.0;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 3 : 5,
+      ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withValues(alpha: compact ? 0.08 : 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+        border: Border.all(
+          color: color.withValues(alpha: compact ? 0.26 : 0.35),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 7,
-            height: 7,
+            width: dotSize,
+            height: dotSize,
             decoration: BoxDecoration(shape: BoxShape.circle, color: color),
           ),
-          const SizedBox(width: 6),
+          SizedBox(width: compact ? 5 : 6),
           Text(
             active ? activeText : inactiveText,
             style: TextStyle(
               color: color,
-              fontSize: 12,
+              fontSize: compact ? 10.5 : 12,
               fontWeight: FontWeight.w600,
             ),
           ),

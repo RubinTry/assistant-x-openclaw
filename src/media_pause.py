@@ -74,6 +74,10 @@ class MediaController:
             logger.warning(f"[媒体] 调用 media-control {args} 失败: {e}")
             return None
 
+    def is_playing(self) -> bool:
+        """查询当前是否有媒体正在播放。无法确定时返回 False（软失败）。"""
+        return self._is_playing()
+
     def _is_playing(self) -> bool:
         """查询当前是否有媒体正在播放。无法确定时返回 False（保守，避免误恢复）。"""
         r = self._run("get")

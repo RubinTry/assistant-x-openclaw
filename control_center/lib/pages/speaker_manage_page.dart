@@ -139,11 +139,7 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
                   child: SingleChildScrollView(
                     child: SelectableText(
                       e.toString(),
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        color: AppColors.consoleText,
-                      ),
+                      style: AppTextStyles.consoleLed,
                     ),
                   ),
                 ),
@@ -258,7 +254,7 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
         ],
       ),
       bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -266,12 +262,14 @@ class _SpeakerManagePageState extends State<SpeakerManagePage> {
               onPressed: _enrollSpeaker,
               icon: const Icon(Icons.add),
               label: const Text('声纹注册'),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(128, 46)),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 14),
             OutlinedButton.icon(
               onPressed: _speakers.isEmpty ? null : _clearAll,
               icon: const Icon(Icons.delete_sweep),
               label: const Text('清空全部'),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(128, 46)),
             ),
           ],
         ),
@@ -451,11 +449,7 @@ class _EnrollDialogState extends State<_EnrollDialog> {
                         padding: const EdgeInsets.all(12),
                         child: SelectableText(
                           _logs.join('\n'),
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                            color: AppColors.consoleText,
-                          ),
+                          style: AppTextStyles.consoleLed,
                         ),
                       ),
               ),

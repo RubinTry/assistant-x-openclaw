@@ -249,6 +249,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on", "y")
+
+
 _load_dotenv()
 
 
@@ -308,6 +315,20 @@ _SPEAKER_DIR = os.path.join(_PROJECT_DIR, "data", "enrollment")
 _SPEAKER_FILE = os.path.join(_SPEAKER_DIR, "speakers.json")
 _SPEAKER_THRESHOLD = _env_float("VOICE_ASSISTANT_SPEAKER_THRESHOLD", 0.55)  # 声纹相似度阈值
 _SPEAKER_NOTIFY_PORT = 18792  # control_center TCP 通知端口
+
+# ── 活体检测配置（实验期默认 shadow mode：记录分数，不拦截唤醒）─────────────
+_LIVENESS_ENABLED = _env_bool("VOICE_ASSISTANT_LIVENESS_ENABLED", True)
+_LIVENESS_ENFORCE = _env_bool("VOICE_ASSISTANT_LIVENESS_ENFORCE", False)
+_LIVENESS_THRESHOLD = _env_float("VOICE_ASSISTANT_LIVENESS_THRESHOLD", 0.5)
+_LIVENESS_MODEL_PATH = os.path.join(
+    _PROJECT_DIR,
+    os.environ.get("VOICE_ASSISTANT_LIVENESS_MODEL", "models/aasist-l.onnx"),
+)
+
+# 本机媒体播放门禁：AASIST 对“电脑扬声器重放”可能给高活体分，
+# 用 Now Playing 状态作为额外信号。默认 shadow，只记录不拦截。
+_MEDIA_WAKE_GUARD_ENABLED = _env_bool("VOICE_ASSISTANT_MEDIA_WAKE_GUARD_ENABLED", True)
+_MEDIA_WAKE_GUARD_ENFORCE = _env_bool("VOICE_ASSISTANT_MEDIA_WAKE_GUARD_ENFORCE", False)
 
 # 音频流假死看门狗：macOS CoreAudio 在反复关停/重开 InputStream 后偶发
 # "start 成功但回调不再送帧"。健康时即使无人说话也会持续产生静音帧，
@@ -381,14 +402,21 @@ def _apply_text_corrections(text):
 _load_text_corrections()
 
 
-def _notify_speaker_rejected():
-    """通知 control_center 声纹验证被拒绝"""
+def _notify_wake_rejected(payload=None):
+    """通知 control_center 唤醒验证被拒绝"""
     import socket
     try:
+        if payload:
+            message = json.dumps(
+                {"type": "wake_rejected", **payload},
+                ensure_ascii=False,
+            ).encode("utf-8") + b"\n"
+        else:
+            message = b"speaker_rejected\n"
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2.0)
         sock.connect(("127.0.0.1", _SPEAKER_NOTIFY_PORT))
-        sock.sendall(b"speaker_rejected\n")
+        sock.sendall(message)
         sock.close()
     except Exception:
         pass
@@ -700,6 +728,8 @@ class VoiceAssistant:
         self._speaker_verified = False  # 标记唤醒者是否已通过声纹验证
         self._speaker_embeddings = {}  # name -> embedding array，用于渐进更新
         self._verified_speaker_name = None  # 当前验证通过的说话人
+        self._media_playing_on_wake = False  # 唤醒瞬间本机是否正在播放媒体
+        self._last_wake_rejection = None  # 最近一次唤醒拒绝原因，供 control_center 弹窗展示
 
         self._is_openclaw_busy = False
         self._is_processing = False  # True: 从指令发出到TTS播报完毕的全流程
@@ -944,6 +974,7 @@ class VoiceAssistant:
         Returns:
             bool: 验证是否通过
         """
+        self._last_wake_rejection = None
         if not self._speaker_enabled:
             return True  # 未启用时默认通过
         
@@ -953,10 +984,22 @@ class VoiceAssistant:
             print("\n[声纹] ⚠️ 拒绝唤醒: 未检测到已注册声纹")
             print("[声纹] 请先使用 control_center 应用注册声纹")
             print("[声纹] 注册完成后请重启语音助手")
+            self._set_wake_rejection(
+                "speaker_unregistered",
+                "声纹未注册",
+                "未检测到已注册的声纹样本，请先在控制中心注册声纹。",
+                action="speaker",
+            )
             return False
         
         if self._speaker_extractor is None or self._speaker_manager is None:
             print("[声纹] 验证系统未就绪，拒绝唤醒")
+            self._set_wake_rejection(
+                "speaker_not_ready",
+                "声纹系统未就绪",
+                "声纹模型或注册样本尚未成功加载，请检查启动日志后重启语音助手。",
+                action="none",
+            )
             return False
         
         # 检查音频样本是否有效
@@ -970,6 +1013,17 @@ class VoiceAssistant:
             print(f"[声纹] 警告: 音频样本过短 ({len(samples)} samples, 需要{min_samples})，跳过验证")
             return True
         
+        # 本机媒体播放是“电脑自己放出唤醒音频”的强信号。先记录/可选拦截，
+        # 避免 AASIST 对电脑扬声器重放给出高活体分时仍进入声纹更新。
+        if not self._verify_media_wake_guard():
+            return False
+
+        # 实验期需要采集“手机/音箱重放但声纹未必通过”的活体分数，
+        # 因此活体检测放在声纹比对之前。默认 shadow mode 只打日志不拦截；
+        # enforce=true 时，疑似重放会在进入声纹/渐进更新前被拒绝。
+        if not self._verify_liveness_on_wake(samples, sample_rate):
+            return False
+
         is_verified, speaker_name, score = _verify_speaker(
             self._speaker_extractor, self._speaker_manager, samples, sample_rate
         )
@@ -982,7 +1036,113 @@ class VoiceAssistant:
         else:
             print(f"[声纹] 验证失败: 未识别到已注册声纹 (score: {score:.3f})")
             print("[声纹] 请使用已注册声纹的用户唤醒，或使用 control_center 注册新声纹")
+            self._set_wake_rejection(
+                "speaker_failed",
+                "声纹验证失败",
+                f"未识别到已注册声纹。本次相似度分数: {score:.3f}。",
+                action="speaker",
+            )
             return False
+
+    def _set_wake_rejection(self, reason: str, title: str, message: str, action: str = "none") -> None:
+        self._last_wake_rejection = {
+            "reason": reason,
+            "title": title,
+            "message": message,
+            "action": action,
+        }
+
+    def _verify_media_wake_guard(self) -> bool:
+        """唤醒瞬间检测本机是否正在播放媒体。
+
+        这是电脑本机重放攻击的强特征；默认 shadow 只记录，不改变体验。
+        enforce=true 时直接拒绝本次唤醒，且不会进入声纹渐进更新。
+        """
+        self._media_playing_on_wake = False
+        if not _MEDIA_WAKE_GUARD_ENABLED:
+            return True
+        try:
+            from media_pause import get_media_controller
+
+            media = get_media_controller()
+            playing = bool(media.is_playing()) if media.is_available() else False
+        except Exception as e:  # noqa: BLE001 - 媒体检测不能阻塞唤醒
+            print(f"[媒体门禁] 检测异常，软失败放行: {e}")
+            return True
+
+        self._media_playing_on_wake = playing
+        mode = "enforce" if _MEDIA_WAKE_GUARD_ENFORCE else "shadow"
+        print(f"[媒体门禁] {mode}: playing={playing}")
+        if playing and _MEDIA_WAKE_GUARD_ENFORCE:
+            print("[媒体门禁] 拒绝唤醒: 检测到本机正在播放媒体，疑似电脑重放")
+            self._set_wake_rejection(
+                "media_playing",
+                "检测到本机媒体播放",
+                "唤醒时电脑正在播放媒体，疑似本机重放录音。已拒绝本次唤醒。",
+                action="none",
+            )
+            return False
+        return True
+
+    def _verify_liveness_on_wake(self, samples, sample_rate=16000) -> bool:
+        """唤醒时做被动活体检测。
+
+        实验期支持 shadow mode：VOICE_ASSISTANT_LIVENESS_ENFORCE=false 时只记录分数，
+        不改变唤醒体验；模型缺失/推理失败由 anti_spoof.py 软失败放行。
+        """
+        if not _LIVENESS_ENABLED:
+            return True
+
+        try:
+            from anti_spoof import get_anti_spoof_detector
+
+            detector = get_anti_spoof_detector(
+                model_path=_LIVENESS_MODEL_PATH,
+                threshold=_LIVENESS_THRESHOLD,
+            )
+            is_live, live_score = detector.is_live(samples, sample_rate)
+        except Exception as e:  # noqa: BLE001 - 活体检测不能拖垮唤醒主链路
+            if _LIVENESS_ENFORCE:
+                print(f"[活体] 检测异常，拒绝唤醒: {e}")
+                self._set_wake_rejection(
+                    "liveness_error",
+                    "活体检测异常",
+                    f"活体检测推理异常，已拒绝本次唤醒。详情: {e}",
+                    action="none",
+                )
+                return False
+            print(f"[活体] 检测异常，软失败放行: {e}")
+            return True
+
+        mode = "enforce" if _LIVENESS_ENFORCE else "shadow"
+        if live_score < 0:
+            if _LIVENESS_ENFORCE:
+                print(f"[活体] {mode}: 模型不可用或推理失败，拒绝唤醒")
+                self._set_wake_rejection(
+                    "liveness_unavailable",
+                    "活体检测不可用",
+                    "活体检测模型不可用或推理失败，已拒绝本次唤醒。请检查 AASIST ONNX 模型与 onnxruntime。",
+                    action="none",
+                )
+                return False
+            print(f"[活体] {mode}: 模型不可用或推理失败，软失败放行")
+            return True
+
+        print(
+            f"[活体] {mode}: score={live_score:.3f}, "
+            f"threshold={_LIVENESS_THRESHOLD:.3f}, pass={is_live}"
+        )
+        if not is_live and _LIVENESS_ENFORCE:
+            print("[活体] 拒绝唤醒: 疑似录音/合成/重放音频")
+            self._set_wake_rejection(
+                "liveness_failed",
+                "活体检测失败",
+                f"疑似录音、合成或重放音频。本次活体分数: {live_score:.3f}，阈值: {_LIVENESS_THRESHOLD:.3f}。",
+                action="none",
+            )
+            return False
+        return True
+
 
     def _update_speaker_progressive(self, samples, sample_rate=16000):
         """用最新对话音频渐进更新已验证用户的声纹嵌入
@@ -991,6 +1151,10 @@ class VoiceAssistant:
         然后持久化到文件并更新内存中的manager。
         """
         if not self._speaker_enabled or self._verified_speaker_name is None:
+            return
+
+        if self._media_playing_on_wake:
+            print("[声纹] 渐进更新跳过: 唤醒时检测到本机媒体播放")
             return
 
         if self._speaker_extractor is None or self._speaker_manager is None:
@@ -1910,9 +2074,15 @@ class VoiceAssistant:
                                 print(f"[声纹] 唤醒词检测成功，准备验证声纹 (样本长度: {len(wake_samples)})")
                                 is_verified = self._verify_speaker_on_wake(wake_samples, self._asr_rate)
                                 if not is_verified:
-                                    print("[声纹] 唤醒被拒绝: 未通过声纹验证")
+                                    reason = self._last_wake_rejection or {}
+                                    title = reason.get("title", "验证未通过")
+                                    print(f"[唤醒] 唤醒被拒绝: {title}")
                                     # 异步发送通知，避免 2 秒 connect 超时阻塞主循环
-                                    threading.Thread(target=_notify_speaker_rejected, daemon=True).start()
+                                    threading.Thread(
+                                        target=_notify_wake_rejected,
+                                        args=(reason,),
+                                        daemon=True,
+                                    ).start()
                                     self._wake_audio_buffer.clear()
                                     self.keyword_spotter.reset_stream(keyword_stream)
                                     print("[声纹] 继续监听...")

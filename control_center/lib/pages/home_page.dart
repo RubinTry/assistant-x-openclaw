@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../services/service_factory.dart';
 import '../models/log_entry.dart';
 import '../theme.dart';
+import 'global_config_page.dart';
 import 'speaker_manage_page.dart';
 import 'model_manage_page.dart';
 
@@ -178,7 +179,9 @@ class HomePageState extends State<HomePage> {
         socket.listen((data) {
           // 必须按 UTF-8 解码：notify_bridge 发的 JSON 含中文，逐字节解码会乱码
           final message = utf8.decode(data, allowMalformed: true).trim();
-          // 新协议：一行 JSON {"type":"notify",...} → 弹系统通知（本应用图标）
+          // 新协议：
+          //   {"type":"notify",...} → 弹系统通知（本应用图标）
+          //   {"type":"wake_rejected",...} → 弹应用内拒绝原因对话框
           // 旧协议：裸串 "speaker_rejected" → 弹应用内"去注册"对话框（向后兼容）
           if (message.startsWith('{')) {
             try {
@@ -188,6 +191,12 @@ class HomePageState extends State<HomePage> {
                   (obj['title'] ?? '').toString(),
                   (obj['text'] ?? '').toString(),
                   obj['sound'] != false,
+                );
+              } else if (obj['type'] == 'wake_rejected') {
+                _showWakeRejectedDialog(
+                  title: (obj['title'] ?? '唤醒被拒绝').toString(),
+                  message: (obj['message'] ?? '本次唤醒未通过验证。').toString(),
+                  action: (obj['action'] ?? 'none').toString(),
                 );
               }
             } catch (_) {}
@@ -204,24 +213,38 @@ class HomePageState extends State<HomePage> {
   }
 
   void _showSpeakerRejectedDialog() {
+    _showWakeRejectedDialog(
+      title: '声纹验证失败',
+      message: '未检测到已注册的声纹样本，请先注册声纹。',
+      action: 'speaker',
+    );
+  }
+
+  void _showWakeRejectedDialog({
+    required String title,
+    required String message,
+    String action = 'none',
+  }) {
     if (!mounted || _alreadyShow) return;
+    final showSpeakerAction = action == 'speaker';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('声纹验证失败'),
-        content: const Text('未检测到已注册的声纹样本，请先注册声纹。'),
+        title: Text(title),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
+            child: Text(showSpeakerAction ? '取消' : '知道了'),
           ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _openSpeakerManagePage();
-            },
-            child: const Text('去注册'),
-          ),
+          if (showSpeakerAction)
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openSpeakerManagePage();
+              },
+              child: const Text('去注册'),
+            ),
         ],
       ),
     ).then((_) {
@@ -469,20 +492,31 @@ class HomePageState extends State<HomePage> {
             children: [
               const ReactorMark(size: 46, icon: Icons.mic),
               const SizedBox(width: 14),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '语音助手控制中心',
-                      style: TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Flexible(
+                          child: Text(
+                            '语音助手控制中心',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        StatusPill(active: _isRunning, compact: true),
+                      ],
                     ),
-                    SizedBox(height: 3),
-                    Text(
+                    const SizedBox(height: 4),
+                    const Text(
                       'Voice runtime, identity gate, and fast-path model routing',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -494,27 +528,27 @@ class HomePageState extends State<HomePage> {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              StatusPill(active: _isRunning),
               const SizedBox(width: 14),
               if (!_isRunning)
                 FilledButton.icon(
                   onPressed: _start,
-                  icon: const Icon(Icons.play_arrow, size: 18),
+                  icon: const Icon(Icons.play_arrow),
                   label: const Text('启动'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.accent,
                     foregroundColor: const Color(0xFF021018),
+                    minimumSize: const Size(108, 46),
                   ),
                 )
               else
                 FilledButton.icon(
                   onPressed: _stop,
-                  icon: const Icon(Icons.stop, size: 18),
+                  icon: const Icon(Icons.stop),
                   label: const Text('停止'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.danger.withValues(alpha: 0.16),
                     foregroundColor: AppColors.danger,
+                    minimumSize: const Size(108, 46),
                     side: BorderSide(
                       color: AppColors.danger.withValues(alpha: 0.45),
                     ),
@@ -545,6 +579,17 @@ class HomePageState extends State<HomePage> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const ModelManagePage()),
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+              _topNavButton(
+                icon: Icons.tune,
+                label: '配置',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const GlobalConfigPage()),
                   );
                 },
               ),
@@ -593,8 +638,12 @@ class HomePageState extends State<HomePage> {
   }) {
     return OutlinedButton.icon(
       onPressed: onTap,
-      icon: Icon(icon, size: 18),
+      icon: Icon(icon),
       label: Text(label),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(92, 46),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      ),
     );
   }
 
@@ -766,12 +815,7 @@ class HomePageState extends State<HomePage> {
                                     : null,
                                 child: Text(
                                   '[${log.formattedTimestamp}] ${log.message}',
-                                  style: const TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 12,
-                                    height: 1.5,
-                                    color: AppColors.consoleText,
-                                  ),
+                                  style: AppTextStyles.consoleLed,
                                 ),
                               ),
                             );
