@@ -234,6 +234,26 @@ class HudBackground extends StatelessWidget {
   }
 }
 
+class HudRoute extends StatelessWidget {
+  final Widget child;
+  const HudRoute({super.key, required this.child});
+
+  static const double titleBarInset = 36;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        const Positioned.fill(child: HudBackground(child: SizedBox.expand())),
+        Padding(
+          padding: const EdgeInsets.only(top: titleBarInset),
+          child: child,
+        ),
+      ],
+    );
+  }
+}
+
 class _HudGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {

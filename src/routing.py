@@ -2,50 +2,71 @@
 # -*- coding: utf-8 -*-
 
 """
-薄硬闸：只拦“明确必须走 agent”的意图，直连 agent，连快模型都不调。
+快路径白名单路由。
 
-作用有二：
-  1) 省税——明确重的消息不必先经快模型再升级，省掉那份 TTFT 升级税。
-  2) 兜底——把快小模型最可能“嘴硬编答案”的高危场景（改变现实/必须用工具）挡在门外。
+策略：
+  - 命中 light_patterns.json 的 agent_intents 时，强制走 agent。
+  - 只有 light_patterns.json 明确命中的轻消息，才允许进入快路径。
+  - 其余消息默认走 agent。
 
-原则：**宁可漏放，不可误拦**。这里只列最不可能被误伤的强信号；模糊的一律交给
-快模型自评（tool call 升级）。词表要短、可从日志迭代，不追求覆盖全。
-命中任一 → is_obviously_heavy 返回 True。
+这样 heavy_patterns.json 不再承担“补漏所有重意图”的职责；系统默认安全地进 agent。
 """
 
-# 明确的动作 / 工具 / 实时 / 记忆强信号。保持精简、低误伤。
-_HEAVY_MARKERS = (
-    # 设备 / 系统动作
-    "打开", "关闭", "关掉", "开一下", "截图", "截屏", "看看屏幕", "看下屏幕",
-    "运行", "执行", "帮我跑", "打开网页", "打开网站",
-    # 检索 / 实时信息
-    "搜索", "搜一下", "查一下", "查询", "查下", "最新消息", "最新新闻", "热搜",
-    "实时", "现在的股价", "股价", "汇率", "快递", "订单",
-    # 通信 / 日程 / 提醒
-    "发消息", "发邮件", "发给", "提醒我", "定个闹钟", "定时", "日程", "安排一下",
-    # 媒体控制
-    "播放", "放首歌", "放首", "放一首", "下一首", "暂停音乐",
-    "来首", "来一首", "来点", "来一段", "来段", "来点音乐",
-    "来小曲", "来一小曲", "来点小曲", "来曲", "来首曲",
-    "放点音乐", "放点歌", "来点歌", "来首歌",
-    # 记忆指代（依赖跨会话记忆）
-    "还记得", "你记得", "我上次说", "上次那个", "之前那个", "我之前", "记一下", "记住",
-    # 中断任务意图——需要 agent 调用 cleanup_browser 等工具真正停止任务
-    "别打开", "别搜", "别执行", "取消刚才", "取消刚才的操作", "别继续",
-    "停止操作", "中断操作", "不要打开", "不要搜",
-    # 英文强信号
-    "search ", "google ", "open the", "play ", "remind me", "send a", "send an",
-    "screenshot", "run this", "what's the latest", "look up",
-    "don't open", "don't search", "cancel that", "stop that", "cancel the",
+_FRESHNESS_MARKERS = (
+    "最新", "最近", "今日", "今天", "现在", "目前", "实时", "现状", "近况",
+    "情况", "进展", "动态", "刚刚", "latest", "recent", "current", "today",
+    "right now", "status",
+)
+
+_EXTERNAL_DOMAINS = (
+    # 体育 / 赛事
+    "世界杯", "足球", "比赛", "赛事", "赛程", "比分", "战况", "战绩", "球队",
+    "联赛", "欧冠", "英超", "西甲", "中超", "世俱杯", "nba", "cba",
+    "world cup", "football", "soccer", "match", "game", "score", "schedule",
+    "league", "team", "champions league", "premier league", "la liga",
+    # 新闻 / 现实动态
+    "新闻", "消息", "热搜", "舆情", "进展", "动态", "发布会", "事故", "政策",
+    # 天气 / 金融 / 交通等外部状态
+    "天气", "气温", "下雨", "降雨", "台风", "股价", "汇率", "航班", "高铁",
+    "快递", "订单",
+    # 市场状态。避免枚举每一种商品，按“行情类问题”归并。
+    "价格", "行情", "报价", "走势", "涨跌", "金价", "油价", "期货", "贵金属",
+    "price", "market", "quote", "trend", "gold", "oil", "futures", "precious metal",
+)
+
+_FRESHNESS_PATTERNS = (
+    "最新消息", "最新新闻", "最新情况", "最新状况", "最新进展", "最新动态",
+    "what's the latest", "what is the latest", "latest status",
 )
 
 
-def is_obviously_heavy(text: str) -> bool:
-    """明确必须走 agent 返回 True；否则 False（交快模型自评）。"""
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+def needs_live_data(text: str) -> bool:
+    """需要实时/外部状态数据的请求返回 True。"""
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    if _contains_any(low, _FRESHNESS_PATTERNS):
+        return True
+    return _contains_any(low, _FRESHNESS_MARKERS) and _contains_any(low, _EXTERNAL_DOMAINS)
+
+
+def is_obviously_light(text: str) -> bool:
+    """明确允许快路径处理返回 True；否则 False（默认走 agent）。"""
     if not text:
         return False
-    low = text.strip().lower()
-    if any(m in low for m in _HEAVY_MARKERS):
-        return True
-    import heavy_store
-    return heavy_store.contains(text)
+    import light_store
+    if light_store.should_handoff(text):
+        return False
+    return light_store.contains(text)
+
+
+def handoff_intent(text: str) -> str:
+    """返回强制升级 agent 的意图名；未命中返回空字符串。"""
+    if not text:
+        return ""
+    import light_store
+    return light_store.matched_agent_intent(text)

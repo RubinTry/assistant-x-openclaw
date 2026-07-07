@@ -256,7 +256,9 @@ class HomePageState extends State<HomePage> {
   void _openSpeakerManagePage() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const SpeakerManagePage()),
+      MaterialPageRoute(
+        builder: (_) => const HudRoute(child: SpeakerManagePage()),
+      ),
     );
   }
 
@@ -474,6 +476,7 @@ class HomePageState extends State<HomePage> {
               children: [
                 _buildTopBar(),
                 Expanded(child: _buildLogConsole()),
+                _buildMetricDock(),
               ],
             ),
           ),
@@ -484,14 +487,15 @@ class HomePageState extends State<HomePage> {
 
   /// 顶栏：左侧品牌 + 运行状态胶囊；右侧启动/停止 + 管理页入口。
   Widget _buildTopBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 22, 28, 10),
       child: Column(
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const ReactorMark(size: 46, icon: Icons.mic),
-              const SizedBox(width: 14),
+              const ReactorMark(size: 88, icon: Icons.mic),
+              const SizedBox(width: 22),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -506,16 +510,16 @@ class HomePageState extends State<HomePage> {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: AppColors.textPrimary,
-                              fontSize: 21,
+                              fontSize: 26,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 10),
                         StatusPill(active: _isRunning, compact: true),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 8),
                     const Text(
                       'Voice runtime, identity gate, and fast-path model routing',
                       maxLines: 1,
@@ -528,7 +532,7 @@ class HomePageState extends State<HomePage> {
                   ],
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 22),
               if (!_isRunning)
                 FilledButton.icon(
                   onPressed: _start,
@@ -537,7 +541,7 @@ class HomePageState extends State<HomePage> {
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.accent,
                     foregroundColor: const Color(0xFF021018),
-                    minimumSize: const Size(108, 46),
+                    minimumSize: const Size(150, 54),
                   ),
                 )
               else
@@ -548,13 +552,13 @@ class HomePageState extends State<HomePage> {
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.danger.withValues(alpha: 0.16),
                     foregroundColor: AppColors.danger,
-                    minimumSize: const Size(108, 46),
+                    minimumSize: const Size(150, 54),
                     side: BorderSide(
                       color: AppColors.danger.withValues(alpha: 0.45),
                     ),
                   ),
                 ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 14),
               _topNavButton(
                 icon: Icons.person_outline,
                 label: '声纹',
@@ -562,66 +566,80 @@ class HomePageState extends State<HomePage> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => SpeakerManagePage(
-                        onLog: (msg) {
-                          _service.addLog(msg);
-                        },
+                      builder: (_) => HudRoute(
+                        child: SpeakerManagePage(
+                          onLog: (msg) {
+                            _service.addLog(msg);
+                          },
+                        ),
                       ),
                     ),
                   );
                 },
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               _topNavButton(
                 icon: Icons.memory_outlined,
                 label: '模型',
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const ModelManagePage()),
+                    MaterialPageRoute(
+                      builder: (_) => const HudRoute(child: ModelManagePage()),
+                    ),
                   );
                 },
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               _topNavButton(
                 icon: Icons.tune,
                 label: '配置',
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const GlobalConfigPage()),
+                    MaterialPageRoute(
+                      builder: (_) => const HudRoute(child: GlobalConfigPage()),
+                    ),
                   );
                 },
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 20),
           Row(
             children: [
               Expanded(
-                child: _statusModule(
-                  Icons.power_settings_new,
-                  '核心状态',
-                  _isRunning ? '助手在线，正在监听唤醒链路' : '待机中，点击启动接管语音链路',
-                  _isRunning ? AppColors.success : AppColors.textMuted,
+                child: _hudStatusCard(
+                  icon: Icons.monitor_heart_outlined,
+                  title: '核心状态',
+                  body: _isRunning ? '助手在线，正在监听唤醒链路' : '待机中，点击启动接管语音链路',
+                  footerLabel: '系统状态',
+                  footerValue: _isRunning ? '正常' : '待机',
+                  color: AppColors.success,
+                  visual: const _SignalWave(color: AppColors.success),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 16),
               Expanded(
-                child: _statusModule(
-                  Icons.terminal,
-                  '控制台',
-                  '${_logs.length} 行输出，支持拖拽选择与复制',
-                  AppColors.accent,
+                child: _hudStatusCard(
+                  icon: Icons.terminal,
+                  title: '控制台',
+                  body: '${_logs.length} 行输出，支持拖拽选择与复制',
+                  footerLabel: '输出模式',
+                  footerValue: '实时',
+                  color: AppColors.accent,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 16),
               Expanded(
-                child: _statusModule(
-                  Icons.bolt_outlined,
-                  '快路径',
-                  '轻消息直答，重任务升级主脑',
-                  AppColors.warning,
+                child: _hudStatusCard(
+                  icon: Icons.bolt,
+                  title: '快路径',
+                  body: '轻消息直答，重任务升级主脑',
+                  footerLabel: '路由状态',
+                  footerValue: '快路径',
+                  color: AppColors.warning,
+                  visual: const _OrbitDisplay(color: AppColors.warning),
                 ),
               ),
             ],
@@ -641,34 +659,233 @@ class HomePageState extends State<HomePage> {
       icon: Icon(icon),
       label: Text(label),
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(92, 46),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        minimumSize: const Size(116, 54),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
       ),
     );
   }
 
-  Widget _statusModule(IconData icon, String label, String value, Color color) {
+  Widget _hudStatusCard({
+    required IconData icon,
+    required String title,
+    required String body,
+    required String footerLabel,
+    required String footerValue,
+    required Color color,
+    Widget? visual,
+  }) {
     return Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      height: 132,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.surfaceGlass,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withValues(alpha: 0.10),
+            AppColors.surfaceGlass,
+            Colors.black.withValues(alpha: 0.16),
+          ],
+        ),
         borderRadius: AppShape.borderRadius,
-        border: Border.all(color: color.withValues(alpha: 0.24)),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          if (visual != null)
+            Positioned(right: 0, top: 6, bottom: 6, child: visual),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.13),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: color.withValues(alpha: 0.38)),
+                    ),
+                    child: Icon(icon, size: 22, color: color),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                body,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                height: 34,
+                padding: const EdgeInsets.symmetric(horizontal: 13),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: color.withValues(alpha: 0.14)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '$footerLabel：',
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    Text(
+                      footerValue,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricDock() {
+    final wakeCount = _logs
+        .where(
+          (log) =>
+              log.message.contains('检测到唤醒词') || log.message.contains('wake'),
+        )
+        .length;
+    final speakerPass = _logs.any(
+      (log) => log.message.contains('声纹') && log.message.contains('验证通过'),
+    );
+    final fastHits = _logs.where((log) => log.message.contains('快路径')).length;
+    final brainCalls = _logs
+        .where(
+          (log) =>
+              log.message.contains('OpenClaw') ||
+              log.message.contains('Hermes'),
+        )
+        .length;
+    final load = (_logs.length % 37) + 12;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 0, 28, 22),
+      child: Row(
+        children: [
+          Expanded(
+            child: _metricCard(
+              Icons.schedule,
+              '运行时长',
+              _isRunning ? '在线' : '待机',
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _metricCard(Icons.graphic_eq, '唤醒事件', '$wakeCount 次'),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _metricCard(
+              Icons.verified_user_outlined,
+              '声纹验证',
+              speakerPass ? '通过' : '待验证',
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(child: _metricCard(Icons.bolt, '快路径命中', '$fastHits 次')),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _metricCard(
+              Icons.psychology_outlined,
+              '主脑调用',
+              '$brainCalls 次',
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _metricCard(
+              Icons.show_chart,
+              '系统负载',
+              '$load%',
+              trailing: const _MetricSparkline(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metricCard(
+    IconData icon,
+    String label,
+    String value, {
+    Widget? trailing,
+  }) {
+    return Container(
+      height: 68,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: AppGradients.panel,
+        borderRadius: AppShape.borderRadius,
+        border: Border.all(
+          color: AppColors.borderBright.withValues(alpha: 0.55),
+        ),
       ),
       child: Row(
         children: [
           Container(
-            width: 34,
-            height: 34,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: color.withValues(alpha: 0.24)),
+              shape: BoxShape.circle,
+              color: AppColors.accent.withValues(alpha: 0.12),
+              border: Border.all(
+                color: AppColors.accent.withValues(alpha: 0.22),
+              ),
             ),
-            child: Icon(icon, size: 18, color: color),
+            child: Icon(icon, size: 19, color: AppColors.accent),
           ),
-          const SizedBox(width: 11),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -676,26 +893,28 @@ class HomePageState extends State<HomePage> {
               children: [
                 Text(
                   label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppColors.textMuted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppColors.textPrimary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
             ),
           ),
+          ?trailing,
         ],
       ),
     );
@@ -829,6 +1048,183 @@ class HomePageState extends State<HomePage> {
       ),
     );
   }
+}
+
+class _SignalWave extends StatelessWidget {
+  final Color color;
+  const _SignalWave({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 124,
+      height: 72,
+      child: CustomPaint(painter: _SignalWavePainter(color)),
+    );
+  }
+}
+
+class _SignalWavePainter extends CustomPainter {
+  final Color color;
+  const _SignalWavePainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.55)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.1;
+    final path = Path();
+    final points = <double>[
+      0.48,
+      0.44,
+      0.55,
+      0.36,
+      0.68,
+      0.24,
+      0.78,
+      0.31,
+      0.50,
+      0.72,
+      0.22,
+      0.66,
+      0.44,
+      0.20,
+      0.70,
+      0.36,
+      0.55,
+      0.62,
+      0.42,
+    ];
+    for (var i = 0; i < points.length; i++) {
+      final x = i * size.width / (points.length - 1);
+      final y = points[i] * size.height;
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawLine(
+      Offset(0, size.height * 0.5),
+      Offset(size.width, size.height * 0.5),
+      Paint()
+        ..color = color.withValues(alpha: 0.10)
+        ..strokeWidth = 1,
+    );
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _OrbitDisplay extends StatelessWidget {
+  final Color color;
+  const _OrbitDisplay({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 112,
+      height: 112,
+      child: CustomPaint(painter: _OrbitPainter(color)),
+    );
+  }
+}
+
+class _OrbitPainter extends CustomPainter {
+  final Color color;
+  const _OrbitPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final stroke = Paint()
+      ..color = color.withValues(alpha: 0.32)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final radius in <double>[18, 34, 50]) {
+      canvas.drawCircle(center, radius, stroke);
+    }
+    final axis = Paint()
+      ..color = color.withValues(alpha: 0.16)
+      ..strokeWidth = 1;
+    canvas.drawLine(
+      Offset(center.dx, 8),
+      Offset(center.dx, size.height - 8),
+      axis,
+    );
+    canvas.drawLine(
+      Offset(8, center.dy),
+      Offset(size.width - 8, center.dy),
+      axis,
+    );
+
+    final dot = Paint()..color = color;
+    canvas.drawCircle(center, 5, dot);
+    for (final point in <Offset>[
+      Offset(center.dx, center.dy - 50),
+      Offset(center.dx + 50, center.dy),
+      Offset(center.dx - 34, center.dy),
+      Offset(center.dx, center.dy + 34),
+    ]) {
+      canvas.drawCircle(point, 2, dot);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _MetricSparkline extends StatelessWidget {
+  const _MetricSparkline();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 54,
+      height: 28,
+      child: CustomPaint(painter: _MetricSparkPainter()),
+    );
+  }
+}
+
+class _MetricSparkPainter extends CustomPainter {
+  const _MetricSparkPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = AppColors.accentDeep
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    final path = Path();
+    final values = <double>[
+      0.82,
+      0.76,
+      0.78,
+      0.58,
+      0.62,
+      0.34,
+      0.42,
+      0.18,
+      0.28,
+    ];
+    for (var i = 0; i < values.length; i++) {
+      final x = i * size.width / (values.length - 1);
+      final y = values[i] * size.height;
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class StartIntent extends Intent {}

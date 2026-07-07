@@ -56,32 +56,13 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": "assistant not ready"}).encode())
         elif self.path in ("/heavy/add", "/heavy/remove"):
-            import heavy_store
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length) if length else b""
-            try:
-                payload = json.loads(body)
-                pattern = (payload.get("pattern") or "").strip()
-            except Exception:
-                pattern = ""
-            if not pattern:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": "missing pattern"}).encode())
-                return
-            if self.path == "/heavy/add":
-                added = heavy_store.add(pattern)
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "ok", "added": added, "pattern": pattern}).encode())
-            else:
-                removed = heavy_store.remove(pattern)
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "ok", "removed": removed, "pattern": pattern}).encode())
+            self.send_response(410)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "error": "heavy_patterns deprecated",
+                "message": "Fast path now uses light_patterns.json as an allowlist.",
+            }).encode())
         elif self.path == "/dnd":
             _dnd_mode = True
             self.send_response(200)
@@ -100,11 +81,14 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/heavy/list":
-            import heavy_store
-            self.send_response(200)
+            self.send_response(410)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"patterns": heavy_store.list_all()}).encode())
+            self.wfile.write(json.dumps({
+                "error": "heavy_patterns deprecated",
+                "patterns": [],
+                "message": "Fast path now uses light_patterns.json as an allowlist.",
+            }).encode())
             return
 
         # 摄像头抓帧：抓一帧 JPEG 直接回给调用方（Hermes 用 curl -o 落地后交 vision_analyze）
@@ -334,6 +318,8 @@ _MEDIA_WAKE_GUARD_ENFORCE = _env_bool("VOICE_ASSISTANT_MEDIA_WAKE_GUARD_ENFORCE"
 # "start 成功但回调不再送帧"。健康时即使无人说话也会持续产生静音帧，
 # 因此"持续 N 秒拿不到任何帧"是死流的可靠信号，不会被正常静默误触发。
 _AUDIO_STALL_TIMEOUT = 15  # 秒
+_AUDIO_DEVICE_WATCH_ENABLED = _env_bool("VOICE_ASSISTANT_AUDIO_DEVICE_WATCH_ENABLED", True)
+_AUDIO_DEVICE_POLL_INTERVAL = _env_float("VOICE_ASSISTANT_AUDIO_DEVICE_POLL_INTERVAL_SECONDS", 1.5)
 
 _dnd_mode = False  # Do Not Disturb 模式，注册时不响应唤醒词
 
@@ -665,6 +651,15 @@ def _batch_sentences(text: str, sent_end: str, max_sentences: int = 4):
     return batches
 
 
+def _short_log_text(text: str, limit: int = 160) -> str:
+    import re
+
+    text = re.sub(r"\s+", " ", (text or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
 class VoiceAssistant:
     def __init__(
         self, args, default_cfg: dict, all_assistants: list, keyword_mapping: dict
@@ -748,6 +743,9 @@ class VoiceAssistant:
         self._keyword_stream_reset_event = (
             threading.Event()
         )  # 用于通知主循环重置 keyword_stream
+        self._audio_device_changed_event = threading.Event()
+        self._audio_device_signature = None
+        self._audio_device_watch_thread = None
         # 打断词 spotter（分流方案 B）：播放期只用"打断词"触发 barge-in，避免助手
         # 自己的 TTS 回声命中唤醒词把自己切断。按当前助手异步加载 keywords/interrupt/<id>.txt。
         self._interrupt_spotter = None
@@ -1400,6 +1398,10 @@ class VoiceAssistant:
             print(f"[分流] 快路径初始化失败（忽略，全走 agent）: {e}")
             self._fast_path = None
 
+    @staticmethod
+    def _agent_label():
+        return "Hermes" if _ENGINE == "hermes" else "OpenClaw"
+
     def _detect_assistant_from_keyword(self, keyword_result: str) -> str:
         """从唤醒词检测结果识别是哪个 assistant"""
         if not keyword_result:
@@ -1438,6 +1440,87 @@ class VoiceAssistant:
                 else f"设备 {default_idx}"
             )
             print(f"使用默认设备: {name}")
+
+    def _get_default_input_device_signature(self):
+        """返回当前默认输入设备签名；查询失败时返回可比较的错误签名。"""
+        try:
+            default_idx = sd.default.device[0]
+            info = None
+            if default_idx is not None and default_idx >= 0:
+                try:
+                    info = sd.query_devices(default_idx)
+                except Exception:
+                    info = None
+            if info is None:
+                info = sd.query_devices(kind="input")
+
+            name = (
+                info.get("name", "unknown")
+                if hasattr(info, "get")
+                else str(info)
+            )
+            max_inputs = (
+                info.get("max_input_channels", 0)
+                if hasattr(info, "get")
+                else 0
+            )
+            samplerate = (
+                info.get("default_samplerate", 0)
+                if hasattr(info, "get")
+                else 0
+            )
+            return (default_idx, name, int(max_inputs or 0), int(float(samplerate or 0)))
+        except Exception as e:
+            return ("unavailable", str(e))
+
+    def _format_audio_device_signature(self, sig) -> str:
+        try:
+            if isinstance(sig, tuple) and len(sig) >= 4:
+                idx, name, channels, rate = sig[:4]
+                return f"{name} (idx={idx}, ch={channels}, sr={rate})"
+            return str(sig)
+        except Exception:
+            return "unknown"
+
+    def _start_audio_device_watcher(self):
+        """监听默认输入设备变化。
+
+        轮询线程只发事件，实际重建音频流在主音频循环中完成，避免跨线程操作
+        PortAudio/CoreAudio 对象。
+        """
+        if not _AUDIO_DEVICE_WATCH_ENABLED:
+            return
+        if self._audio_device_watch_thread and self._audio_device_watch_thread.is_alive():
+            return
+
+        interval = max(0.5, float(_AUDIO_DEVICE_POLL_INTERVAL))
+        self._audio_device_signature = self._get_default_input_device_signature()
+        print(
+            "[音频设备] 默认输入设备: "
+            + self._format_audio_device_signature(self._audio_device_signature)
+        )
+
+        def _watch():
+            while not self.stop_event.wait(interval):
+                sig = self._get_default_input_device_signature()
+                if sig == self._audio_device_signature:
+                    continue
+                old = self._audio_device_signature
+                self._audio_device_signature = sig
+                print(
+                    "[音频设备] 默认输入设备变化: "
+                    + self._format_audio_device_signature(old)
+                    + " -> "
+                    + self._format_audio_device_signature(sig)
+                )
+                self._audio_device_changed_event.set()
+
+        self._audio_device_watch_thread = threading.Thread(
+            target=_watch,
+            name="audio-device-watch",
+            daemon=True,
+        )
+        self._audio_device_watch_thread.start()
 
     def _create_keyword_spotter(self):
         """创建关键词检测器"""
@@ -1871,6 +1954,7 @@ class VoiceAssistant:
                 print(f"[离线识别] 识别失败: {e}")
                 return None
 
+        self._start_audio_device_watcher()
         start_audio_stream()
         print("开始监听...")
         print("提示: 说出唤醒词后可进入连续对话模式")
@@ -1890,6 +1974,32 @@ class VoiceAssistant:
 
         while not self.stop_event.is_set():
             try:
+                if self._audio_device_changed_event.is_set():
+                    self._audio_device_changed_event.clear()
+                    print("[音频设备] 检测到输入设备变化，正在重建音频流...")
+                    reset_audio_stream()
+                    time.sleep(0.1)
+                    self._clear_queue()
+                    keyword_stream = self.keyword_spotter.create_stream()
+                    recognition_stream = (
+                        self.recognizer.create_stream() if self.is_awake else None
+                    )
+                    recognition_result = ""
+                    if self._use_offline_asr:
+                        vad_stream = None
+                        _create_vad_stream()
+                        audio_buffer = []
+                        speech_started = False
+                    elif self.vad_config:
+                        vad_stream = None
+                        _create_vad_stream()
+                    self._wake_audio_buffer.clear()
+                    self._vad_buffer.clear()
+                    self._conv_audio_buffer.clear()
+                    self.last_activity_time = time.time()
+                    print("[音频设备] 音频流已切换到当前默认输入设备")
+                    continue
+
                 # 检查是否需要重置 keyword_stream（由 exit_standby 触发）
                 if self._keyword_stream_reset_event.is_set():
                     self._keyword_stream_reset_event.clear()
@@ -2466,19 +2576,19 @@ class VoiceAssistant:
         self._last_interrupt_time = time.time()
 
     def _clear_openclaw_context(self):
-        """退下时通知 OpenClaw 清空会话上下文（异步，不阻塞）"""
+        """退下时通知主脑清空会话上下文（异步，不阻塞）"""
         try:
             self.openclaw.send_clear_command()
-            print("[OpenClaw] 已发送 /clear，清空会话上下文")
+            print(f"[{self._agent_label()}] 已发送 /clear，清空会话上下文")
         except Exception as e:
-            print(f"[OpenClaw] 发送 /clear 失败: {e}")
+            print(f"[{self._agent_label()}] 发送 /clear 失败: {e}")
 
     def _route_stream(self, text, on_chunk=None, on_start=None, on_end=None,
                       on_tool_call=None):
-        """分流：快模型第一线，重消息 tool call 升级到 agent。
+        """分流：轻消息白名单进快模型，其余默认走 agent。
 
         与桥 send_and_wait_stream 同签名/同回调契约——TTS 流水线、等待音、结果处理
-        全部复用，两条路对上层完全透明。未配置快模型 / 明确重意图 / 快路径失败，
+        全部复用，两条路对上层完全透明。未配置快模型 / 非轻消息 / 快路径失败，
         一律走 agent 兜底（fail-open）。
         """
         import routing
@@ -2486,7 +2596,7 @@ class VoiceAssistant:
         use_fast = (
             fp is not None
             and fp.is_available()
-            and not routing.is_obviously_heavy(text)
+            and routing.is_obviously_light(text)
         )
         if use_fast:
             try:
@@ -2498,7 +2608,7 @@ class VoiceAssistant:
                 print(f"[分流] 升级 agent（{h.reason}）: {h.task[:50]}")
                 text = h.task or text  # 用模型清洗过的任务文本（兜底原文）
         else:
-            reason = "无快模型" if (fp is None or not fp.is_available()) else "硬闸命中"
+            reason = "无快模型" if (fp is None or not fp.is_available()) else "非轻消息"
             print(f"[分流] 直连 agent（{reason}）")
 
         # 重路径：agent 桥（openclaw / hermes），保持原有行为不变
@@ -2534,7 +2644,7 @@ class VoiceAssistant:
                 hint = ""
         print(f"[待决策] 后台任务在跑（{hint[:40] or '未知'}），询问是否继续...")
         try:
-            text_to_speech_play("先生，刚才那件事还没忙完。要我接着做吗？")
+            text_to_speech_play("Sir, the previous task is still running. Shall I continue?")
         except Exception as e:  # noqa: BLE001 — 播报失败不影响后续决策监听
             print(f"[待决策] 询问播报失败（忽略）: {e}")
 
@@ -2569,8 +2679,52 @@ class VoiceAssistant:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _prepare_agent_text(self, text: str) -> str:
+        """Jarvis full-English mode: translate Chinese before agent routing."""
+        if self.current_cfg.get("id") != "jarvis":
+            return text
+        if not self.current_cfg.get("full_english_mode", False):
+            return text
+        try:
+            from translation import contains_cjk, translate_to_english
+        except Exception as e:  # noqa: BLE001
+            print(f"[语言模式] 翻译模块不可用，保持原文: {e}")
+            return text
+
+        if not contains_cjk(text):
+            return text
+
+        try:
+            import routing
+            original_needs_live_data = routing.needs_live_data(text)
+        except Exception:  # noqa: BLE001
+            routing = None
+            original_needs_live_data = False
+
+        result = translate_to_english(text)
+        print("[语言模式] english")
+        print(f"[翻译] zh->en {result.latency_ms}ms")
+        print(f"[翻译] 原文: {_short_log_text(result.original_text)}")
+        if result.success and result.translated_text:
+            translated = result.translated_text
+            if (
+                original_needs_live_data
+                and routing is not None
+                and not routing.needs_live_data(translated)
+            ):
+                translated = f"Current live-data request: {translated}"
+            print(f"[翻译] EN: {_short_log_text(translated)}")
+            return translated
+
+        fallback = (
+            "Sorry, sir. The local translator failed, so I will not send the "
+            "Chinese request to Jarvis."
+        )
+        print(f"[翻译] 失败: {result.error or 'unknown'}")
+        return fallback
+
     def _on_recognized(self, text: str):
-        """识别结果 → 发送给 OpenClaw → 整体合成播报回复"""
+        """识别结果 → 发送给当前主脑 → 整体合成播报回复"""
         # 唤醒待决策：上一句问了"要不要继续"，这句就是回答。
         if self._pending_resume_decision:
             self._pending_resume_decision = False
@@ -2581,16 +2735,18 @@ class VoiceAssistant:
             elif decision == "abandon":
                 self._abandon_previous_task()
                 try:
-                    text_to_speech_play("好的，先生。那件事先搁一边。")
+                    text_to_speech_play("Understood, sir. I will set that aside.")
                 except Exception:  # noqa: BLE001
                     pass
                 return  # 本轮不发引擎
             else:  # new_command：搁置旧任务，把这句当新指令发引擎
                 self._abandon_previous_task()
 
-        print(f"\n[→ OpenClaw] {text}")
+        text = self._prepare_agent_text(text)
+        agent_label = self._agent_label()
+        print(f"\n[→ {agent_label}] {text}")
 
-        # 在发送给 OpenClaw 之前的一瞬间，还原特效大小
+        # 在发送给主脑之前的一瞬间，还原特效大小
         self.visual.reset_speaking_scale()
 
         print("◈ 正在思考...", end="", flush=True)
@@ -2598,7 +2754,7 @@ class VoiceAssistant:
         with self._processing_turn_lock:
             self._processing_turn_id += 1
             turn_id = self._processing_turn_id
-            self._is_processing = True  # 标记全流程：指令发出→OpenClaw回复→TTS播报完毕
+            self._is_processing = True  # 标记全流程：指令发出→主脑回复→TTS播报完毕
             self._is_openclaw_busy = True
         self._stop_openclaw_request.clear()
         self._openclaw_request_active.set()
@@ -2761,7 +2917,7 @@ class VoiceAssistant:
                         return
                     self._waiting_active.clear()
                     time.sleep(0.05)
-                    print("\n[← OpenClaw] ", end="", flush=True)
+                    print(f"\n[← {agent_label}] ", end="", flush=True)
 
                 def _on_stream_chunk(chunk):
                     if self._stop_openclaw_request.is_set():
@@ -2826,7 +2982,7 @@ class VoiceAssistant:
                 except queue.Empty:
                     if self._stop_openclaw_request.is_set():
                         self.openclaw.send_stop_command()  # 软停止，不断开 SSE
-                        print("\n[打断] OpenClaw 请求已软停止")
+                        print(f"\n[打断] {agent_label} 请求已软停止")
                         return
 
             if status == "success":
@@ -2852,18 +3008,26 @@ class VoiceAssistant:
 
                     # 只在仍然处于连续对话模式时才提示继续
                     if self.continuous_mode:
-                        print("◈ 继续说吧，我在听着...", flush=True)
+                        print("◈ Go ahead, sir. I am listening...", flush=True)
                         self.jarvis.play_sound("continue")
                     return
                 else:
-                    print("\n[← OpenClaw] (无回复)")
-                    self.jarvis.on_error("无回复")
+                    fallback = "Sorry, sir. I did not receive a valid response from the main agent."
+                    print(f"\n[← {agent_label}] (无回复)")
+                    print(f"[{agent_label}] 空回复：请求完成但未收到文本内容")
+                    self.visual.show_ai_text(fallback)
+                    self.jarvis.on_error("No response")
+                    if not self._stop_openclaw_request.is_set():
+                        try:
+                            text_to_speech_play(fallback)
+                        except Exception as e:  # noqa: BLE001
+                            print(f"[{agent_label}] 空回复兜底播报失败: {e}")
                     # 空回复时也根据连续对话状态给提示
                     if self.continuous_mode:
-                        print("◈ 继续说吧，我在听着...", flush=True)
+                        print("◈ Go ahead, sir. I am listening...", flush=True)
                         self.jarvis.play_sound("continue")
             else:
-                print(f"[OpenClaw] 异常: {data}")
+                print(f"[{agent_label}] 异常: {data}")
                 self.jarvis.on_error(data)
         finally:
             # 兜底停掉增量 TTS 流水线与残留播放（打断/异常/无回复路径）

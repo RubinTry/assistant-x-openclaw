@@ -2,11 +2,12 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
+    private var screenParametersObserver: NSObjectProtocol?
+
     override func awakeFromNib() {
         let flutterViewController = FlutterViewController()
 
-        let screenFrame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        self.setFrame(screenFrame, display: true)
+        self.pinToPrimaryScreen()
 
         self.contentViewController = flutterViewController
 
@@ -26,14 +27,34 @@ class MainFlutterWindow: NSWindow {
 
         RegisterGeneratedPlugins(registry: flutterViewController)
 
+        screenParametersObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.pinToPrimaryScreen()
+        }
+
         super.awakeFromNib()
     }
 
-    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
-        if let screen = NSScreen.main {
-            super.setFrame(screen.frame, display: flag)
-        } else {
-            super.setFrame(frameRect, display: flag)
+    deinit {
+        if let observer = screenParametersObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
+    }
+
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        super.setFrame(Self.primaryScreenFrame, display: flag)
+    }
+
+    private func pinToPrimaryScreen() {
+        super.setFrame(Self.primaryScreenFrame, display: true)
+    }
+
+    private static var primaryScreenFrame: NSRect {
+        NSScreen.screens.first?.frame
+            ?? NSScreen.main?.frame
+            ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
     }
 }

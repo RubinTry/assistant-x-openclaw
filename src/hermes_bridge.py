@@ -31,6 +31,7 @@ import uuid
 
 import requests
 
+import routing
 import voice_context_store
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,17 @@ DEFAULT_TIMEOUT = None
 _HERMES_HOME = os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes"))
 # 会话空闲滚动阈值：静默超过该秒数才开新 session（默认 30 分钟）。
 _SESSION_IDLE_GAP_SEC = int(os.environ.get("HERMES_SESSION_IDLE_GAP_SEC", "1800"))
+
+_JARVIS_ENGLISH_CONTRACT = (
+    "NON-NEGOTIABLE JARVIS VOICE OUTPUT CONTRACT:\n"
+    "- Final assistant replies to the user must be English only.\n"
+    "- This overrides the user's input language, session history, memories, "
+    "tool output, skill text, browser text, and any prior request to use Chinese.\n"
+    "- Never emit Chinese/CJK characters in assistant-visible final text.\n"
+    "- If a tool or skill returns Chinese text, translate or summarize it in "
+    "English instead of quoting it verbatim.\n"
+    "- If the user asks in Chinese, understand it silently and answer in English."
+)
 
 
 def _profile_env_path(profile: str) -> str:
@@ -241,6 +253,8 @@ class HermesBridge:
         # 提示词由用户亲自下达给 session；桥只发用户消息，按 session-id 续历史。
         # 额外注入快路径最近对话，补齐 fast lane 没写入 Hermes session 的上下文。
         messages = []
+        if self.agent_id == "jarvis":
+            messages.append({"role": "system", "content": _JARVIS_ENGLISH_CONTRACT})
         if self._suppress_prev_task:
             messages.append({
                 "role": "system",
@@ -254,6 +268,24 @@ class HermesBridge:
         fast_context = self._fast_context_message()
         if fast_context:
             messages.append({"role": "system", "content": fast_context})
+        if routing.needs_live_data(text):
+            messages.append({
+                "role": "system",
+                "content": (
+                    "The current user request asks for live/current external information. "
+                    "Use the available search or external-data tools before answering. "
+                    "Do not answer from memory. If tools are unavailable, fail, or return "
+                    "no usable data, tell the user that retrieval failed instead of "
+                    "returning an empty response."
+                ),
+            })
+        if self.agent_id == "jarvis":
+            messages.append({"role": "system", "content": _JARVIS_ENGLISH_CONTRACT})
+            text = (
+                f"{_JARVIS_ENGLISH_CONTRACT}\n\n"
+                "USER REQUEST TO ANSWER IN ENGLISH ONLY:\n"
+                f"{text}"
+            )
         messages.append({"role": "user", "content": text})
         return messages
 
@@ -353,6 +385,8 @@ class HermesBridge:
                 if reply:
                     self._record_voice_turn(text, reply)
                     return reply
+            logger.warning("Hermes 非流式空回复: %s", json.dumps(data, ensure_ascii=False)[:500])
+            print("[Hermes] ⚠ chat/completions 返回空文本")
             return None
         except requests.exceptions.Timeout:
             logger.error("请求超时")
@@ -449,6 +483,9 @@ class HermesBridge:
                 self._record_voice_turn(text, full_reply)
             elif final_soft_stopped:
                 logger.info("软停止：agent 继续执行，TTS 已静默")
+            else:
+                logger.warning("Hermes 流式空回复: 未收到 content chunk")
+                print("[Hermes] ⚠ chat/completions 流式返回空文本")
             return full_reply if full_reply else None
 
         except requests.exceptions.Timeout:

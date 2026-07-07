@@ -21,15 +21,16 @@
             },
             "keywords_file": "keywords/jarvis.txt",
             "asr_mode": "offline",
+            "full_english_mode": true,
             "tts_configs": {
                 "jarvis": {
                     "metallic": {
                         "enabled": true,
                         "af": {
-                            "aecho": "0.8:0.85:20|45|70:0.45|0.32|0.12",
-                            "chorus": "0.4:0.6:45:0.2:0.18:1.2",
-                            "bass": "g=4:f=110",
-                            "treble": "g=2.5",
+                            "aecho": "0.8:0.78:20|45|70:0.36|0.24|0.08",
+                            "chorus": "0.4:0.52:45:0.16:0.18:0.9",
+                            "bass": "g=3.6:f=110",
+                            "treble": "g=1.8",
                             "highpass": "f=90",
                             "lowpass": "f=8500"
                         }
@@ -42,10 +43,10 @@
                      "metallic": {
                         "enabled": false,
                         "af": {
-                            "aecho": "0.8:0.85:20|45|70:0.45|0.32|0.12",
-                            "chorus": "0.4:0.6:45:0.2:0.18:1.2",
-                            "bass": "g=4:f=110",
-                            "treble": "g=2.5",
+                            "aecho": "0.8:0.78:20|45|70:0.36|0.24|0.08",
+                            "chorus": "0.4:0.52:45:0.16:0.18:0.9",
+                            "bass": "g=3.6:f=110",
+                            "treble": "g=1.8",
                             "highpass": "f=90",
                             "lowpass": "f=8500"
                         }

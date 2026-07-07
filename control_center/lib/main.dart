@@ -111,15 +111,21 @@ class ControlCenterApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       // 自定义标题栏常驻所有页面顶部（含 Navigator 内的推入路由）
-      builder: (context, child) => HudBackground(
-        child: Column(
+      builder: (context, child) => ColoredBox(
+        color: Colors.black,
+        child: Stack(
           children: [
-            const WindowTitleBar(),
-            Expanded(child: child ?? const SizedBox.shrink()),
+            Positioned.fill(child: child ?? const SizedBox.shrink()),
+            const Positioned(
+              left: 0,
+              top: 0,
+              right: 0,
+              child: WindowTitleBar(),
+            ),
           ],
         ),
       ),
-      home: HomePage(key: homePageKey),
+      home: HudRoute(child: HomePage(key: homePageKey)),
     );
   }
 }

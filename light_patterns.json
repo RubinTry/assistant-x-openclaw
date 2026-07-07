@@ -1,0 +1,261 @@
+{
+  "version": 3,
+  "description": "Fast-path intent routing. agent_intents are checked first and always go to the agent. intents are conservative light intents; anything uncertain misses and goes to the agent.",
+  "agent_intents": {
+    "memory_write_or_persistent_preference": {
+      "description": "要求记住、长期偏好、以后都这样等，需要写入或更新记忆",
+      "regex": [
+        "^\\s*(记住|你要记住|帮我记住|一定要记住|以后|从现在开始|往后|以后都|以后全部|以后回复|以后说话|以后叫我|以后称呼我|我的规矩是|有条规矩|规矩是).+",
+        "^\\s*(remember\\s+this|remember\\s+that|you\\s+must\\s+remember|from\\s+now\\s+on|always\\s+reply|always\\s+call\\s+me|call\\s+me\\s+.+|my\\s+rule\\s+is).+"
+      ]
+    },
+    "memory_task_continuation": {
+      "description": "基于之前上下文继续做事，需要 agent 理解、计划或执行",
+      "regex": [
+        "^\\s*(继续|接着|接着上次|继续刚才|继续之前|按刚才|按上次|根据之前|基于之前|照刚才|照上次|用刚才|用之前).+",
+        "^\\s*(continue|resume|carry\\s+on|based\\s+on\\s+(what\\s+)?we\\s+said|based\\s+on\\s+the\\s+previous|use\\s+the\\s+previous|from\\s+before).+"
+      ]
+    },
+    "memory_action_request": {
+      "description": "问记忆后要求修改、打开、搜索、写代码、执行动作等",
+      "regex": [
+        ".*(记得|刚才|之前|上次|以前).*(帮我|给我|替我|继续|修改|改一下|重写|设计|生成|整理|搜索|查一下|打开|关闭|运行|执行|修复|实现|部署|下载|创建|删除|保存).*",
+        ".*(remember|previous|before|last\\s+time).*(help\\s+me|continue|change|rewrite|design|generate|search|open|close|run|execute|fix|implement|deploy|download|create|delete|save).*"
+      ]
+    },
+    "live_data_request": {
+      "description": "实时/外部状态问题，必须交给 agent 使用工具",
+      "regex": [
+        ".*(最新|实时|现状|近况|行情|价格|走势|天气|新闻|比分|赛程|航班|高铁|快递|订单).*",
+        ".*(latest|recent|current|today|right\\s+now|price|market|weather|news|score|schedule|flight|train|tracking).*"
+      ]
+    },
+    "device_or_app_action": {
+      "description": "设备、应用、文件、系统动作，必须交给 agent",
+      "regex": [
+        ".*(打开|关闭|暂停|播放|锁屏|退下|睡眠|关机|重启|截图|录屏|复制|粘贴|保存|下载|上传|删除|移动|创建|运行|执行|启动).+",
+        ".*(open|close|pause|play|lock|sleep|shutdown|restart|screenshot|record|copy|paste|save|download|upload|delete|move|create|run|execute|launch).+"
+      ]
+    }
+  },
+  "intents": {
+    "wake_greeting": {
+      "description": "系统唤醒问候消息",
+      "prefix": [
+        "voice-assistant-wake-up-"
+      ]
+    },
+    "greeting": {
+      "description": "问好 / 招呼",
+      "regex": [
+        "^\\s*(hello|hi|hey|yo|good\\s+(morning|afternoon|evening|night)|morning|afternoon|evening|night)[!.。！,， ]*$",
+        "^\\s*(你?好|您好|早上好|早安|中午好|下午好|晚上好|晚安|哈喽|嗨|嘿|喂|hello|hi|hey)(呀|啊|吗|么|呢|啦|哈|哇|贾维斯|jarvis|jovi\\s*s)?[!.。！?？,， ]*$"
+      ]
+    },
+    "presence_check": {
+      "description": "确认是否在线 / 是否听得到",
+      "regex": [
+        "^\\s*(在吗|还在吗|你在吗|听得到吗|能听见吗|醒着吗|起来了吗|上线了吗|are\\s+you\\s+there|can\\s+you\\s+hear\\s+me)[!.。！?？,， ]*$"
+      ]
+    },
+    "connection_test": {
+      "description": "链路测试 / 简短试音",
+      "regex": [
+        "^\\s*(test|testing|ping|mic\\s*test|voice\\s*test)[!.。！?？,， ]*$",
+        "^\\s*(测试|试一下|试音|麦克风测试|连接测试|能不能听见|能不能听到|听得见吗|有反应吗|有声音吗|在线吗|还活着吗)(呀|啊|吗|么|呢|啦|哈)?[!.。！?？,， ]*$"
+      ]
+    },
+    "ack_receipt": {
+      "description": "收到 / 明白 / 了解",
+      "regex": [
+        "^\\s*(got\\s+it|copy|roger|understood|noted|收到|明白|懂了|知道了|了解)(了|啦|吧|呀|啊|呢|哈)?[!.。！,， ]*$"
+      ]
+    },
+    "ack_acceptance": {
+      "description": "接受 / 同意 / 可以",
+      "regex": [
+        "^\\s*(ok|okay|k|yes|yeah|yep|sure|fine|good|alright|all\\s+right|好的?|好哒|好嘞|可以|行|妥|嗯+|哦+|昂|没问题)(了|啦|吧|呀|啊|呢|哈)?[!.。！,， ]*$"
+      ]
+    },
+    "ack_confirmation": {
+      "description": "确认对错 / 认可",
+      "regex": [
+        "^\\s*(对|是的|没错|正确|就是|确实如此|exactly|correct|right|that'?s\\s+right)(了|啦|吧|呀|啊|呢|哈)?[!.。！,， ]*$"
+      ]
+    },
+    "ack_finalize": {
+      "description": "结束当前选择 / 定稿",
+      "regex": [
+        "^\\s*(就这样|就这样吧|这样就行|可以了|就这个|定了|先这样)(了|啦|吧|呀|啊|呢|哈)?[!.。！,， ]*$"
+      ]
+    },
+    "decline_offer": {
+      "description": "拒绝提议 / 暂时不用",
+      "regex": [
+        "^\\s*(no|nope|nah|not\\s+now|不用|不用了|不用不用|不需要|不用管|先不用|暂时不用)(了|啦|吧|呀|啊|呢)?[!.。！,， ]*$"
+      ]
+    },
+    "cancel_current": {
+      "description": "取消当前轻互动",
+      "regex": [
+        "^\\s*(never\\s+mind|forget\\s+it|算了|罢了|没事|没事了|算了吧|先算了|别了)(了|啦|吧|呀|啊|呢)?[!.。！,， ]*$"
+      ]
+    },
+    "correction_negative": {
+      "description": "简短否定 / 纠错前置",
+      "regex": [
+        "^\\s*(不是|不对|不太对|错了|别|nope|not\\s+really|wrong)(了|啦|吧|呀|啊|呢)?[!.。！,， ]*$"
+      ]
+    },
+    "thanks": {
+      "description": "感谢",
+      "regex": [
+        "^\\s*(thank(s|\\s+you)(\\s+so\\s+much)?|thanks|thx|appreciate\\s+it|much\\s+appreciated|谢谢|多谢|谢了|感谢|太感谢了|辛苦了|麻烦你了)(了|啦|呀|啊|哈)?[!.。！,， ]*$"
+      ]
+    },
+    "apology": {
+      "description": "道歉 / 礼貌缓和",
+      "regex": [
+        "^\\s*(sorry|my\\s+bad|不好意思|抱歉|对不起|我的锅)(了|啦|呀|啊|哈)?[!.。！,， ]*$"
+      ]
+    },
+    "laughter": {
+      "description": "笑声 / 笑点回应",
+      "regex": [
+        "^\\s*(哈哈+|嘿嘿+|呵呵+|笑死|lol|haha+|hehe+)[!.。！,， ]*$"
+      ]
+    },
+    "positive_reaction": {
+      "description": "正向短反应",
+      "regex": [
+        "^\\s*(有点意思|还行|不错|挺好|可以可以|牛|厉害|漂亮|完美|稳|nice|cool|great|perfect)(了|啦|吧|呀|啊|呢|哈)?[!.。！,， ]*$"
+      ]
+    },
+    "understanding_reaction": {
+      "description": "理解 / 恍然大悟",
+      "regex": [
+        "^\\s*(确实|也是|行吧|好吧|那行|那好|原来如此|怪不得|难怪|嗯哼|that\\s+makes\\s+sense|i\\s+see|makes\\s+sense)[!.。！,， ]*$"
+      ]
+    },
+    "surprise_reaction": {
+      "description": "惊讶 / 吐槽",
+      "regex": [
+        "^\\s*(好家伙|离谱|啊这|我去|嚯|wow|whoa|seriously)[!.。！,， ]*$"
+      ]
+    },
+    "hesitation_reaction": {
+      "description": "犹豫 / 思考助词",
+      "regex": [
+        "^\\s*(em+|emm+|hmm+|well|ah|呃|额|哎|唉)[!.。！,， ]*$"
+      ]
+    },
+    "joke_request": {
+      "description": "讲笑话",
+      "regex": [
+        "^\\s*(讲|说|来)(个|一个|点)?(冷)?笑话(吧|呀|啊|呗)?[!.。！?？,， ]*$",
+        "^\\s*(tell\\s+me\\s+a\\s+joke|say\\s+something\\s+funny|make\\s+me\\s+laugh)[!.。！?？,， ]*$"
+      ]
+    },
+    "comfort_request": {
+      "description": "安慰 / 陪伴",
+      "regex": [
+        "^\\s*(安慰我一下|陪我聊(会|一会儿?)|陪我说会话|讲点轻松的)(吧|呀|啊|呗)?[!.。！?？,， ]*$",
+        "^\\s*(comfort\\s+me|keep\\s+me\\s+company|talk\\s+with\\s+me\\s+for\\s+a\\s+bit)[!.。！?？,， ]*$"
+      ]
+    },
+    "encourage_request": {
+      "description": "鼓励 / 打气",
+      "regex": [
+        "^\\s*(鼓励我一下|给我打打气|给我点动力|cheer\\s+me\\s+up|encourage\\s+me)(吧|呀|啊|呗)?[!.。！?？,， ]*$"
+      ]
+    },
+    "compliment_request": {
+      "description": "夸一句",
+      "regex": [
+        "^\\s*(夸我一句|夸夸我|say\\s+something\\s+nice|compliment\\s+me)(吧|呀|啊|呗)?[!.。！?？,， ]*$"
+      ]
+    },
+    "casual_chat_request": {
+      "description": "明确轻量闲聊",
+      "regex": [
+        "^\\s*(随便聊聊|说点有意思的|small\\s+talk|chat\\s+with\\s+me)[!.。！?？,， ]*$"
+      ]
+    },
+    "wellbeing_chitchat": {
+      "description": "状态寒暄 / 情绪寒暄",
+      "regex": [
+        "^\\s*(你(还)?好(吗|嘛)|你怎么样|你最近怎么样|你状态怎么样|你忙吗|你累吗|你开心吗|今天状态如何|感觉怎么样)(呀|啊|呢|啦)?[!.。！?？,， ]*$",
+        "^\\s*(how\\s+are\\s+you|how'?s\\s+it\\s+going|are\\s+you\\s+ok|you\\s+alright|how\\s+do\\s+you\\s+feel)[!.。！?？,， ]*$"
+      ]
+    },
+    "who_are_you": {
+      "description": "角色身份轻问答",
+      "regex": [
+        "^\\s*(你是谁|你叫什么|你是贾维斯吗|你还记得你是谁吗|你是我的助手吗|你现在是什么角色)(呀|啊|吗|呢|来着)?[!.。！?？,， ]*$",
+        "^\\s*(who\\s+are\\s+you|what\\s+are\\s+you|are\\s+you\\s+jarvis|what('?s|\\s+is)\\s+your\\s+name)[!.。！?？,， ]*$"
+      ]
+    },
+    "capability_brief": {
+      "description": "能力范围轻问答，限定短句",
+      "regex": [
+        "^\\s*(你能做什么|你会什么|你能干嘛|介绍一下你自己)(呀|啊|吗|呢|来着)?[!.。！?？,， ]*$",
+        "^\\s*(what\\s+can\\s+you\\s+do|introduce\\s+yourself)[!.。！?？,， ]*$"
+      ]
+    },
+    "relationship_chitchat": {
+      "description": "角色关系轻问答",
+      "regex": [
+        "^\\s*(你跟托尼是什么关系|你和托尼什么关系)(呀|啊|吗|呢|来着)?[!.。！?？,， ]*$"
+      ]
+    },
+    "temporary_style_request": {
+      "description": "不涉及记忆写入的临时短风格请求",
+      "regex": [
+        "^\\s*(简单点|短一点|说短点|长话短说|直接说|别废话|说人话|用英文说|用中文说)(吧|呀|啊|呢)?[!.。！,， ]*$",
+        "^\\s*(keep\\s+it\\s+short|shorter|briefly|be\\s+brief|in\\s+english|in\\s+chinese)[!.。！,， ]*$"
+      ]
+    },
+    "memory_recent_user_message": {
+      "description": "询问用户自己刚才/上一条说了什么，可直接读取近期语音日志",
+      "regex": [
+        "^\\s*(我(刚刚|刚才|上一句|上一条|前一句|前面)说(了)?什么|我刚刚问(了)?什么|我刚才问(了)?什么|我上一条消息是什么|我上一句话是什么)(呀|啊|来着|吗|呢)?[!.。！?？,， ]*$",
+        "^\\s*(what\\s+did\\s+i\\s+(just\\s+)?say|what\\s+was\\s+my\\s+(last|previous)\\s+(message|question))[!.。！?？,， ]*$"
+      ]
+    },
+    "memory_recent_assistant_message": {
+      "description": "询问助手刚才/上一条回复了什么，可直接读取近期语音日志",
+      "regex": [
+        "^\\s*(你(刚刚|刚才|上一句|上一条|前一句|前面)说(了)?什么|你(刚刚|刚才)回复(了)?什么|你上一条回复是什么|你上一句话是什么)(呀|啊|来着|吗|呢)?[!.。！?？,， ]*$",
+        "^\\s*(what\\s+did\\s+you\\s+(just\\s+)?say|what\\s+was\\s+your\\s+(last|previous)\\s+(message|reply))[!.。！?？,， ]*$"
+      ]
+    },
+    "memory_last_turn": {
+      "description": "询问最近一轮/上一条消息是什么，可读取近期语音日志",
+      "regex": [
+        "^\\s*(上一条消息是什么|上一句是什么|刚才说到哪了|刚刚聊到哪了|刚才聊到哪了|我们刚才聊到哪了|刚才是什么来着)(呀|啊|吗|呢)?[!.。！?？,， ]*$",
+        "^\\s*(what\\s+was\\s+the\\s+(last|previous)\\s+message|where\\s+were\\s+we|what\\s+were\\s+we\\s+talking\\s+about)[!.。！?？,， ]*$"
+      ]
+    },
+    "memory_profile_lookup": {
+      "description": "轻量读取用户画像：名字、称呼等，只回答事实，不执行后续任务",
+      "regex": [
+        "^\\s*(你记得我叫(什么|啥)吗|你还记得我叫(什么|啥)吗|我叫什么(来着)?|你记得我的名字吗|你知道我的名字吗|你记得怎么称呼我吗)(呀|啊|呢)?[!.。！?？,， ]*$",
+        "^\\s*(do\\s+you\\s+remember\\s+my\\s+name|what\\s+is\\s+my\\s+name|do\\s+you\\s+remember\\s+what\\s+to\\s+call\\s+me)[!.。！?？,， ]*$"
+      ]
+    },
+    "memory_preference_lookup": {
+      "description": "轻量读取偏好/习惯，只回答事实，不执行后续任务",
+      "regex": [
+        "^\\s*(你记得我的偏好吗|你记得我喜欢什么吗|你知道我喜欢什么吗|我之前说过我喜欢什么吗|你记得我的习惯吗|你记得我不喜欢什么吗)(呀|啊|呢)?[!.。！?？,， ]*$",
+        "^\\s*(do\\s+you\\s+remember\\s+my\\s+preferences|what\\s+do\\s+i\\s+like|do\\s+you\\s+remember\\s+what\\s+i\\s+like|do\\s+you\\s+remember\\s+what\\s+i\\s+dislike)[!.。！?？,， ]*$"
+      ]
+    },
+    "simple_fixed_math": {
+      "description": "无需工具的固定简单算术",
+      "regex": [
+        "^\\s*(1\\s*\\+\\s*1|一加一)\\s*(=|等于)?\\s*(是)?\\s*(多少|几)?\\s*$",
+        "^\\s*(2\\s*\\+\\s*2|二加二|两加两)\\s*(=|等于)?\\s*(是)?\\s*(多少|几)?\\s*$"
+      ]
+    }
+  }
+}

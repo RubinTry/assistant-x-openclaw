@@ -19,6 +19,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -43,6 +44,7 @@ _CONNECT_TIMEOUT = 6.0
 _READ_TIMEOUT = 60.0
 _HISTORY_TURNS = 3  # 快路径注入的近期对话轮数（含 fast + agent 轮，供短追问续接）
 _HISTORY_MSG_CHARS = 240
+_MEMORY_DIRECT_CHARS = 260
 
 _MEMORY_TRIGGERS = (
     "记得", "还记得", "上次", "之前", "以前", "刚才", "我的", "我喜欢", "我不喜欢",
@@ -112,9 +114,10 @@ def _fast_persona_rules(agent_name: str, persona: str) -> str:
         )
     if "jarvis" in hay or "贾维斯" in hay:
         return (
-            "You are Jarvis. Reply in the user's language. Address the user as "
-            "\"sir\" when natural. Keep a calm, precise, composed assistant tone. "
-            "Be concise and natural for voice. Do not use markdown unless asked."
+            "You are Jarvis. Always reply in English, even when the user speaks "
+            "or writes in another language. Address the user as \"sir\" when "
+            "natural. Keep a calm, precise, composed assistant tone. Be concise "
+            "and natural for voice. Do not use markdown unless asked."
         )
     if name:
         return (
@@ -144,7 +147,8 @@ def _routing_system_prompt(agent_name: str, persona: str) -> str:
         "off) with ONE short, warm greeting in character. Do NOT mention the wake-up "
         "message or the voice-assistant system, do NOT say goodbye or try to exit, and do "
         "NOT call any tool — just greet and wait for them.\n"
-        "When answering directly: reply in the user's language, short and spoken, "
+        "When answering directly as Jarvis, reply in English only. Otherwise reply "
+        "in the configured character's required language. Keep it short and spoken, "
         "no markdown, no lists."
     )
 
@@ -184,24 +188,8 @@ class FastPathClient:
         self._history.clear()
 
     def _build_system_prompt(self, text: str) -> str:
-        """English routing prompt + learned heavy patterns + optional memory context."""
+        """English routing prompt + optional memory context."""
         parts = [_routing_system_prompt(self.agent_name, self.persona)]
-
-        # 重消息库：用户/agent 教过的"必须 handoff"样例。作为参考注入，让模型对
-        # 语义相近但字面不同的说法也能类比判断（硬闸只做子串精确匹配，这里补语义泛化）。
-        try:
-            import heavy_store
-            patterns = heavy_store.list_all()
-            if patterns:
-                parts.append(
-                    "# Known requests that ALWAYS require the agent (hand off)\n"
-                    "These are learned examples. If the user's message means the same "
-                    "kind of thing as any of these — even with different wording — call "
-                    "handoff_to_agent. Do not answer it yourself.\n"
-                    + json.dumps(patterns, ensure_ascii=False)
-                )
-        except Exception:  # noqa: BLE001 — 重消息库注入永不影响主流程
-            pass
 
         hr = self.history_reader
         if hr is not None and _needs_memory_context(text):
@@ -249,6 +237,20 @@ class FastPathClient:
     # ── 主入口（与桥 drop-in 同签名）─────────────────────────────────
     def send_and_wait_stream(self, text, on_chunk=None, on_start=None,
                              on_end=None, on_tool_call=None):
+        intent = self._light_intent(text)
+        if intent.startswith("memory_recent_") or intent == "memory_last_turn":
+            answer = self._answer_recent_memory(text, intent)
+            if not answer:
+                raise AgentHandoff(text, text, reason="memory-miss")
+            if on_start:
+                on_start()
+            if on_chunk:
+                on_chunk(answer)
+            self._remember(text, answer)
+            if on_end:
+                on_end()
+            return answer
+
         cfg = model_store.get_current_decrypted()
         if cfg is None:
             raise AgentHandoff(text, text, reason="unavailable")
@@ -457,6 +459,97 @@ class FastPathClient:
         raise AgentHandoff(original_text, original_text, reason="empty")
 
     # ── 内部工具 ────────────────────────────────────────────────────
+    @staticmethod
+    def _light_intent(text: str) -> str:
+        try:
+            import light_store
+            return light_store.matched_intent(text)
+        except Exception:
+            return ""
+
+    def _answer_recent_memory(self, text: str, intent: str) -> str:
+        turns = self._recent_voice_turns(limit=14)
+        if not turns:
+            return ""
+
+        low = (text or "").strip().lower()
+        if intent == "memory_recent_user_message":
+            turn = self._latest_role_turn(turns, "user")
+            return self._format_memory_answer("user", turn)
+        if intent == "memory_recent_assistant_message":
+            turn = self._latest_role_turn(turns, "assistant")
+            return self._format_memory_answer("assistant", turn)
+        if intent == "memory_last_turn":
+            if re.search(r"(我|用户|user).*(刚|上一|最后)|刚才我|我刚刚|my\\s+(last|previous)", low):
+                return self._format_memory_answer("user", self._latest_role_turn(turns, "user"))
+            if re.search(r"(你|助手|assistant|jarvis).*(刚|上一|最后)|你刚刚|you\\s+(just|last|previous)", low):
+                return self._format_memory_answer("assistant", self._latest_role_turn(turns, "assistant"))
+            return self._format_memory_answer("last", turns[-1])
+        return ""
+
+    def _recent_voice_turns(self, limit: int = 12) -> list[dict]:
+        try:
+            shared = voice_context_store.recent_turns(self.agent_id, limit=limit)
+            if shared:
+                return self._clean_turns(shared, limit)
+        except Exception:
+            pass
+
+        hr = self.history_reader
+        if hr is not None:
+            try:
+                if hr.is_available():
+                    return self._clean_turns(hr.recent_turns(limit=limit), limit)
+            except Exception:
+                pass
+        return []
+
+    @staticmethod
+    def _clean_turns(turns: list[dict], limit: int) -> list[dict]:
+        seen = set()
+        out = []
+        for turn in turns:
+            role = turn.get("role")
+            content = (turn.get("content") or "").strip()
+            if role not in ("user", "assistant") or not content:
+                continue
+            key = (role, content)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"role": role, "content": content})
+        return out[-limit:]
+
+    @staticmethod
+    def _latest_role_turn(turns: list[dict], role: str) -> dict | None:
+        for turn in reversed(turns):
+            if turn.get("role") == role:
+                return turn
+        return None
+
+    def _format_memory_answer(self, kind: str, turn: dict | None) -> str:
+        if not turn:
+            return ""
+        content = (turn.get("content") or "").strip()
+        if not content:
+            return ""
+        content = content[:_MEMORY_DIRECT_CHARS]
+        role = turn.get("role") or kind
+        is_jarvis = "jarvis" in f"{self.agent_id} {self.agent_name}".lower()
+        if is_jarvis:
+            if kind == "user":
+                return f'Your previous message was: "{content}"'
+            if kind == "assistant":
+                return f'My previous reply was: "{content}"'
+            label = "your message" if role == "user" else "my reply"
+            return f'The previous voice turn was {label}: "{content}"'
+        if kind == "user":
+            return f"你上一条说的是：{content}"
+        if kind == "assistant":
+            return f"我上一条回复的是：{content}"
+        label = "你说的" if role == "user" else "我回复的"
+        return f"上一条是{label}：{content}"
+
     @staticmethod
     def _extract_task(tool_acc: dict) -> str:
         """从累积的 tool_call 参数里取 handoff 的 task 字段。"""
