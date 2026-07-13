@@ -55,7 +55,7 @@ TONY STARK :3.5
 T O N Y  S T A R K :3.5
 CLAUDE CODE :3.5
 CODEX :2.0
-JARVIS :2.5
+JARVIS :3.5
 贾 维 斯
 PLAY SOME MUSIC
 英 语 互 聊
@@ -68,3 +68,5 @@ ZOOM
 IS JARVIS HERE :3.5
 HELLO JARVIS :3.5
 智 能 体
+调 取
+小 红 书

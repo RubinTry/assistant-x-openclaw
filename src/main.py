@@ -8,6 +8,7 @@
 """
 
 import argparse
+import difflib
 import json
 import os
 import platform
@@ -709,6 +710,15 @@ class VoiceAssistant:
         self.last_activity_time = time.time()
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
         self._wake_buffer_max_samples = int(self._asr_rate * 3)  # 最多存3秒（16kHz）
+        # 实验：待机时以完整 ASR 话语替代专用 KWS。保留旧 KWS 路径作为回退，
+        # VOICE_ASSISTANT_CONTINUOUS_WAKE_ASR=false 可随时关闭。
+        self._continuous_wake_asr = _env_bool(
+            "VOICE_ASSISTANT_CONTINUOUS_WAKE_ASR", True
+        )
+        self._standby_utterance_max_samples = int(
+            self._asr_rate
+            * _env_float("VOICE_ASSISTANT_STANDBY_UTTERANCE_MAX_SECONDS", 8.0)
+        )
         self._prev_dnd_mode = False  # 上一轮勿扰状态，用于检测 DND 解除瞬间清流
 
         # VAD 前置缓存（用于待机时轻量级语音检测）
@@ -734,12 +744,20 @@ class VoiceAssistant:
         self._stop_openclaw_request = threading.Event()
         self._ignore_next_result = False
         self._suppress_recognition_until_tts_done = False
+        self._suppress_recognition_during_tts = _env_bool(
+            "VOICE_ASSISTANT_SUPPRESS_RECOGNITION_DURING_TTS", True
+        )
         # 唤醒待决策：退下后台任务仍在跑时，唤醒不主动接续，改问"要不要继续"。
         # 置位后，下一句用户话被当作 是/否 决策处理（见 _on_recognized 开头）。
         self._pending_resume_decision = False
         self._last_diag_log = 0.0  # 监听循环诊断日志节流时间戳（文件级，不进控制中心）
         self._last_interrupt_time = 0  # 记录上次打断时间，用于防止误触发
         self._last_wake_time = 0  # 记录上次唤醒时间，唤醒后保护期内跳过退出检测
+        # KWS 已验证并激活，但“唤醒词+指令”这一整句话仍在同一 ASR 流中收尾。
+        self._wake_prefixed_command_pending = False
+        self._wake_command_prefix = ""
+        self._wake_asr_prefix = ""
+        self._wake_canonical_name = ""
         self._keyword_stream_reset_event = (
             threading.Event()
         )  # 用于通知主循环重置 keyword_stream
@@ -822,6 +840,10 @@ class VoiceAssistant:
             f"已加载 {len(all_assistants)} 个 assistant: {[a['name'] for a in all_assistants]}"
         )
         print(f"唤醒词: {self._get_keywords()}")
+        print(
+            "[实验] 待机持续 ASR 唤醒: "
+            + ("已启用" if self._continuous_wake_asr else "已关闭（使用 KWS）")
+        )
         print("正在检测 OpenClaw 连接...")
         print("提示: 说出任意唤醒词即可唤醒对应的 assistant，支持连续对话")
 
@@ -919,6 +941,11 @@ class VoiceAssistant:
         value = bool(value)
         changed = value != self._is_awake
         self._is_awake = value
+        if not value and hasattr(self, "_wake_prefixed_command_pending"):
+            self._wake_prefixed_command_pending = False
+            self._wake_command_prefix = ""
+            self._wake_asr_prefix = ""
+            self._wake_canonical_name = ""
         if changed:
             self._lifecycle.notify(value)
 
@@ -1415,6 +1442,88 @@ class VoiceAssistant:
         # 如果没找到，返回当前 assistant
         return self.current_cfg["id"]
 
+    def _extract_standby_wake_command(self, text: str):
+        """从完整待机话语提取 (assistant_id, wake_word, command)。
+
+        比较时忽略空白、标点和大小写，但 command 保留 ASR 原文。为减少讨论中偶然
+        提及助手名字造成的验证开销，唤醒词只允许出现在话语开头很短的前导语之后。
+        """
+        raw = _apply_text_corrections((text or "").strip())
+        if not raw:
+            return None
+
+        compact = []
+        raw_indexes = []
+        for index, char in enumerate(raw):
+            if char.isalnum() or "\u4e00" <= char <= "\u9fff":
+                compact.append(char.casefold())
+                raw_indexes.append(index)
+        normalized = "".join(compact)
+        max_prefix = _env_int("VOICE_ASSISTANT_WAKE_MAX_PREFIX_CHARS", 2)
+
+        best = None
+        for wake_word, assistant_id in self.keyword_mapping.items():
+            wake_normalized = "".join(
+                char.casefold()
+                for char in wake_word
+                if char.isalnum() or "\u4e00" <= char <= "\u9fff"
+            )
+            if not wake_normalized:
+                continue
+            position = normalized.find(wake_normalized)
+            if position < 0 or position > max_prefix:
+                continue
+            end_position = position + len(wake_normalized) - 1
+            raw_end = raw_indexes[end_position] + 1
+            command = raw[raw_end:].lstrip(" \t\r\n，,。.!！?？:：、")
+            candidate = (position, -len(wake_normalized), assistant_id, wake_word, command)
+            if best is None or candidate[:2] < best[:2]:
+                best = candidate
+
+        if best is None:
+            return None
+        return best[2], best[3], best[4]
+
+    def _is_complete_wake_phrase_tail(self, text: str) -> bool:
+        """判断 ASR 尾部是否只是完整唤醒短语的一部分，而非真实指令。"""
+        if self.current_cfg.get("id") != "jarvis":
+            return False
+        normalized = "".join(char.casefold() for char in (text or "") if char.isalnum())
+        # "Is Jarvis here?" 中 KWS 从 Jarvis 命中；在线 ASR 常把 here 写成 care。
+        return normalized in {"here", "care"}
+
+    def _strip_kws_confirmed_wake_prefix(self, text: str):
+        """KWS 已确认身份后，从 ASR 整句中稳健剥离可能漂移的唤醒词转写。
+
+        在线 ASR 的 partial 可能从 JAVAS 漂移成 JAVAIS，不能依赖命中瞬间文本与
+        final 完全一致。固定格式是“唤醒词+指令”，因此可对句首英文 token 与
+        Jarvis/KWS 时转写做相似度判断；只有高相似时才剥离。
+        """
+        raw = (text or "").strip()
+        extracted = self._extract_standby_wake_command(raw)
+        if extracted is not None:
+            return extracted[2], True
+
+        prefix = (self._wake_asr_prefix or "").strip()
+        if prefix and raw.casefold().startswith(prefix.casefold()):
+            return raw[len(prefix):].lstrip(" \t\r\n，,。.!！?？:：、"), True
+
+        match = _re_corrections.match(r"^([A-Za-z]+)", raw)
+        if match:
+            token = match.group(1).casefold()
+            candidates = ["jarvis"]
+            if prefix and prefix.isascii():
+                candidates.append(prefix.casefold())
+            similarity = max(
+                difflib.SequenceMatcher(None, token, candidate).ratio()
+                for candidate in candidates
+            )
+            if similarity >= 0.65:
+                command = raw[match.end():].lstrip(" \t\r\n，,。.!！?？:：、")
+                return command, True
+
+        return raw, False
+
     def _check_microphone(self):
         """检查麦克风设备"""
         devices = sd.query_devices()
@@ -1882,6 +1991,12 @@ class VoiceAssistant:
         audio_buffer = []
         speech_started = False
         speech_start_time = 0
+        standby_recognition_stream = (
+            self.recognizer.create_stream() if self._continuous_wake_asr else None
+        )
+        standby_recognition_result = ""
+        standby_last_result_time = time.time()
+        standby_audio_buffer = []
 
         def start_audio_stream():
             nonlocal audio_stream
@@ -1985,6 +2100,11 @@ class VoiceAssistant:
                         self.recognizer.create_stream() if self.is_awake else None
                     )
                     recognition_result = ""
+                    if self._continuous_wake_asr:
+                        standby_recognition_stream = self.recognizer.create_stream()
+                        standby_recognition_result = ""
+                        standby_last_result_time = time.time()
+                        standby_audio_buffer = []
                     if self._use_offline_asr:
                         vad_stream = None
                         _create_vad_stream()
@@ -2010,6 +2130,11 @@ class VoiceAssistant:
                     time.sleep(0.05)
                     self._clear_queue()
                     keyword_stream = self.keyword_spotter.create_stream()
+                    if self._continuous_wake_asr:
+                        standby_recognition_stream = self.recognizer.create_stream()
+                        standby_recognition_result = ""
+                        standby_last_result_time = time.time()
+                        standby_audio_buffer = []
                     start_audio_stream()
                     time.sleep(0.05)
                     self._clear_queue()
@@ -2017,7 +2142,7 @@ class VoiceAssistant:
                     continue
 
                 # 处理中（OpenClaw请求→TTS播报完毕），只检测唤醒词以支持打断
-                if self._is_processing:
+                if self._is_processing and self._suppress_recognition_during_tts:
                     try:
                         audio_data = self.audio_queue.get(timeout=0.5)
                     except queue.Empty:
@@ -2138,7 +2263,200 @@ class VoiceAssistant:
                     # 避免声纹录入刚结束就被尾音误唤醒（边沿触发，仅在 True→False 时执行一次）
                     if self._prev_dnd_mode and not _dnd_mode:
                         keyword_stream = self.keyword_spotter.create_stream()
+                        if self._continuous_wake_asr:
+                            standby_recognition_stream = self.recognizer.create_stream()
+                            standby_recognition_result = ""
+                            standby_last_result_time = time.time()
+                            standby_audio_buffer = []
                     self._prev_dnd_mode = _dnd_mode
+
+                    # 实验路径：VAD 后的完整话语持续进入普通 ASR，endpoint 后再从
+                    # 文本中提取“唤醒词 + 指令”。验证使用同一句的音频；失败静默丢弃。
+                    # 此分支开启时不再并行跑 KWS，避免 KWS 提前命中并清掉后续指令。
+                    if self._continuous_wake_asr:
+                        standby_audio_buffer.append(asr_samples.tolist())
+                        standby_total = sum(len(buf) for buf in standby_audio_buffer)
+                        while standby_total > self._standby_utterance_max_samples:
+                            standby_total -= len(standby_audio_buffer.pop(0))
+
+                        standby_recognition_stream.accept_waveform(
+                            self._asr_rate, asr_samples
+                        )
+                        while self.recognizer.is_ready(standby_recognition_stream):
+                            self.recognizer.decode_stream(standby_recognition_stream)
+                        standby_result = self.recognizer.get_result(
+                            standby_recognition_stream
+                        )
+                        if (
+                            standby_result
+                            and standby_result != standby_recognition_result
+                        ):
+                            standby_recognition_result = standby_result
+                            standby_last_result_time = time.time()
+                            print(
+                                f"\r[待机 ASR] {standby_recognition_result}",
+                                end="",
+                                flush=True,
+                            )
+
+                        # KWS 与待机 ASR 并行：KWS 一命中就验证并激活，但绝不清空
+                        # 音频队列或重建 ASR 流。后半句继续进入同一个识别 stream。
+                        keyword_stream.accept_waveform(self._asr_rate, asr_samples)
+                        early_wake_result = ""
+                        while self.keyword_spotter.is_ready(keyword_stream):
+                            self.keyword_spotter.decode_stream(keyword_stream)
+                            early_wake_result = self.keyword_spotter.get_result(
+                                keyword_stream
+                            )
+                            if early_wake_result:
+                                break
+
+                        if early_wake_result and not _dnd_mode:
+                            is_assistant_wake = any(
+                                wake_word in early_wake_result
+                                or early_wake_result in wake_word
+                                for wake_word in self.keyword_mapping
+                            )
+                            if not is_assistant_wake:
+                                keyword_stream = self.keyword_spotter.create_stream()
+                                continue
+                            if vad_stream is not None and not vad_has_speech:
+                                keyword_stream = self.keyword_spotter.create_stream()
+                                continue
+
+                            print(f"\n[实验] KWS 提前命中: {early_wake_result}")
+                            wake_samples = [
+                                sample
+                                for buf in self._wake_audio_buffer
+                                for sample in buf
+                            ]
+                            if self._speaker_enabled:
+                                print(
+                                    "[声纹] 唤醒词阶段立即进行声纹+活体验证 "
+                                    f"(样本长度: {len(wake_samples)})"
+                                )
+                                if not self._verify_speaker_on_wake(
+                                    wake_samples, self._asr_rate
+                                ):
+                                    print("[实验] 验证未通过，静默忽略")
+                                    keyword_stream = self.keyword_spotter.create_stream()
+                                    standby_recognition_stream = (
+                                        self.recognizer.create_stream()
+                                    )
+                                    standby_recognition_result = ""
+                                    standby_last_result_time = time.time()
+                                    standby_audio_buffer = []
+                                    continue
+                                self._speaker_verified = True
+
+                            detected_assistant_id = self._detect_assistant_from_keyword(
+                                early_wake_result
+                            )
+                            if detected_assistant_id != self.current_cfg["id"]:
+                                self._switch_assistant(detected_assistant_id)
+                                self._init_openclaw()
+
+                            self.is_awake = True
+                            self.continuous_mode = True
+                            self._wake_prefixed_command_pending = True
+                            # 通用 ASR 可能把 KWS 已确认的 JARVIS 写成 JOVI 等近音词。
+                            # 记住命中瞬间的 ASR 前缀，显示时用标准助手名替换，提交时剥离。
+                            self._wake_asr_prefix = standby_recognition_result.strip()
+                            target_cfg = self.all_assistants.get(
+                                detected_assistant_id, self.current_cfg
+                            )
+                            self._wake_canonical_name = (
+                                target_cfg.get("name")
+                                or detected_assistant_id
+                            )
+                            wake_timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                            self._wake_command_prefix = (
+                                f"voice-assistant-wake-up-{wake_timestamp}"
+                            )
+                            self.last_voice_time = time.time()
+                            self._last_wake_time = time.time()
+                            # 关键：沿用待机阶段已经接收“唤醒词”的同一个 ASR 流。
+                            recognition_stream = standby_recognition_stream
+                            recognition_result = standby_recognition_result
+                            keyword_stream = self.keyword_spotter.create_stream()
+                            self.visual.show_wake_effect()
+                            print("[实验] 身份验证通过，立即激活并继续听取本句指令...")
+                            continue
+
+                        standby_endpoint = self.recognizer.is_endpoint(
+                            standby_recognition_stream
+                        )
+                        standby_stable_timeout = (
+                            bool(standby_recognition_result)
+                            and time.time() - standby_last_result_time
+                            > _env_float(
+                                "VOICE_ASSISTANT_STANDBY_SILENCE_SECONDS", 1.5
+                            )
+                        )
+                        if standby_endpoint or standby_stable_timeout:
+                            final_text = standby_recognition_result.strip()
+                            if final_text:
+                                print(f"\n[待机 ASR] 完整话语: {final_text}")
+                            wake_command = self._extract_standby_wake_command(final_text)
+                            utterance_samples = [
+                                sample
+                                for buf in standby_audio_buffer
+                                for sample in buf
+                            ]
+                            standby_recognition_stream = self.recognizer.create_stream()
+                            standby_recognition_result = ""
+                            standby_last_result_time = time.time()
+                            standby_audio_buffer = []
+
+                            if _dnd_mode or not wake_command:
+                                continue
+
+                            detected_assistant_id, wake_word, command = wake_command
+                            print(
+                                f"\n[实验] 完整话语命中唤醒词: {wake_word}; "
+                                f"指令: {command or '(空)'}"
+                            )
+                            if self._speaker_enabled:
+                                print(
+                                    "[声纹] 使用完整待机话语进行声纹+活体验证 "
+                                    f"(样本长度: {len(utterance_samples)})"
+                                )
+                                if not self._verify_speaker_on_wake(
+                                    utterance_samples, self._asr_rate
+                                ):
+                                    print("[实验] 验证未通过，静默忽略")
+                                    continue
+                                self._speaker_verified = True
+
+                            if detected_assistant_id != self.current_cfg["id"]:
+                                self._switch_assistant(detected_assistant_id)
+                                self._init_openclaw()
+
+                            self.is_awake = True
+                            self.continuous_mode = True
+                            self.last_voice_time = time.time()
+                            self._last_wake_time = time.time()
+                            recognition_result = ""
+                            recognition_stream = self.recognizer.create_stream()
+                            keyword_stream = self.keyword_spotter.create_stream()
+                            self.visual.show_wake_effect()
+                            print("[实验] 验证通过，助手已激活")
+
+                            if command:
+                                self.visual.show_user_text(command)
+                                threading.Thread(
+                                    target=self._on_recognized,
+                                    args=(command,),
+                                    daemon=True,
+                                ).start()
+                            elif self._has_inflight_task():
+                                self._ask_resume_decision()
+                            else:
+                                print("[实验] 未附带指令，等待下一句话...")
+                            continue
+
+                        # endpoint 前留在待机 ASR 分支，不让旧 KWS 提前抢占。
+                        continue
 
                     # KWS 实时检测
                     keyword_stream.accept_waveform(self._asr_rate, asr_samples)
@@ -2300,9 +2618,20 @@ class VoiceAssistant:
                     if result and result != recognition_result:
                         recognition_result = result
                         self.last_voice_time = time.time()
+                        display_result = result
+                        if self._wake_prefixed_command_pending:
+                            display_tail, prefix_stripped = (
+                                self._strip_kws_confirmed_wake_prefix(result)
+                            )
+                            if prefix_stripped:
+                                display_result = (
+                                    self._wake_canonical_name + display_tail
+                                )
+                            if self._is_complete_wake_phrase_tail(display_tail):
+                                display_result = "Is Jarvis here?"
                         if not self._suppress_recognition_until_tts_done:
-                            print(f"\r✓ 识别: {result}", end="", flush=True)
-                        self.visual.show_user_text(result)
+                            print(f"\r✓ 识别: {display_result}", end="", flush=True)
+                        self.visual.show_user_text(display_result)
 
                     _early_recog = (
                         recognition_result.strip() if recognition_result else ""
@@ -2395,6 +2724,44 @@ class VoiceAssistant:
                             self._clear_queue()
 
                             _recog = recognition_result.strip()
+                            if self._wake_prefixed_command_pending:
+                                self._wake_prefixed_command_pending = False
+                                command, prefix_stripped = (
+                                    self._strip_kws_confirmed_wake_prefix(_recog)
+                                )
+                                if prefix_stripped:
+                                    recognition_result = command
+                                    _recog = command.strip()
+                                    print(
+                                        "[实验] KWS 已确认唤醒，移除 ASR 句首唤醒转写，"
+                                        f"最终指令: {_recog or '(空)'}"
+                                    )
+                                if self._is_complete_wake_phrase_tail(_recog):
+                                    print(
+                                        f"[实验] {_recog!r} 识别为完整唤醒短语尾部，"
+                                        "不作为指令提交"
+                                    )
+                                    recognition_result = ""
+                                    _recog = ""
+                                # 若 ASR 从唤醒词之后才开始产出文本，则保留原结果。
+                                self._wake_asr_prefix = ""
+                                self._wake_canonical_name = ""
+
+                                if not _recog:
+                                    recognition_result = ""
+                                    recognition_stream = self.recognizer.create_stream()
+                                    if self._wake_command_prefix:
+                                        wake_only_text = self._wake_command_prefix
+                                        self._wake_command_prefix = ""
+                                        print("[实验] 完整唤醒短语，发送纯 wake-up 上下文")
+                                        threading.Thread(
+                                            target=self._on_recognized,
+                                            args=(wake_only_text,),
+                                            daemon=True,
+                                        ).start()
+                                    else:
+                                        print("[实验] 本句没有附带指令，继续等待...")
+                                    continue
                             # 打断后 2 秒内、唤醒后 2 秒内跳过退出检测，避免残留音频误触发
                             _recent_interrupt = (
                                 time.time() - self._last_interrupt_time
@@ -2442,9 +2809,19 @@ class VoiceAssistant:
 
                             self.visual.show_user_text(recognition_result)
                             if not self._ignore_next_result:
+                                dispatch_text = recognition_result
+                                if self._wake_command_prefix:
+                                    dispatch_text = (
+                                        f"{self._wake_command_prefix}\n{recognition_result}"
+                                    )
+                                    print(
+                                        "[实验] 发送带唤醒上下文的指令: "
+                                        f"{self._wake_command_prefix} + {recognition_result}"
+                                    )
+                                    self._wake_command_prefix = ""
                                 threading.Thread(
                                     target=self._on_recognized,
-                                    args=(recognition_result,),
+                                    args=(dispatch_text,),
                                     daemon=True,
                                 ).start()
                             else:
@@ -2584,7 +2961,7 @@ class VoiceAssistant:
             print(f"[{self._agent_label()}] 发送 /clear 失败: {e}")
 
     def _route_stream(self, text, on_chunk=None, on_start=None, on_end=None,
-                      on_tool_call=None):
+                      on_tool_call=None, force_agent_reason: str = ""):
         """分流：轻消息白名单进快模型，其余默认走 agent。
 
         与桥 send_and_wait_stream 同签名/同回调契约——TTS 流水线、等待音、结果处理
@@ -2596,6 +2973,7 @@ class VoiceAssistant:
         use_fast = (
             fp is not None
             and fp.is_available()
+            and not force_agent_reason
             and routing.is_obviously_light(text)
         )
         if use_fast:
@@ -2608,7 +2986,10 @@ class VoiceAssistant:
                 print(f"[分流] 升级 agent（{h.reason}）: {h.task[:50]}")
                 text = h.task or text  # 用模型清洗过的任务文本（兜底原文）
         else:
-            reason = "无快模型" if (fp is None or not fp.is_available()) else "非轻消息"
+            if force_agent_reason:
+                reason = f"原文强制 agent: {force_agent_reason}"
+            else:
+                reason = "无快模型" if (fp is None or not fp.is_available()) else "非轻消息"
             print(f"[分流] 直连 agent（{reason}）")
 
         # 重路径：agent 桥（openclaw / hermes），保持原有行为不变
@@ -2681,6 +3062,10 @@ class VoiceAssistant:
 
     def _prepare_agent_text(self, text: str) -> str:
         """Jarvis full-English mode: translate Chinese before agent routing."""
+        # 组合唤醒指令的协议前缀必须原样保留，只翻译后面的自然语言任务。
+        if text.startswith("voice-assistant-wake-up-") and "\n" in text:
+            wake_prefix, command = text.split("\n", 1)
+            return f"{wake_prefix}\n{self._prepare_agent_text(command)}"
         if self.current_cfg.get("id") != "jarvis":
             return text
         if not self.current_cfg.get("full_english_mode", False):
@@ -2723,6 +3108,14 @@ class VoiceAssistant:
         print(f"[翻译] 失败: {result.error or 'unknown'}")
         return fallback
 
+    @staticmethod
+    def _agent_handoff_intent(text: str) -> str:
+        try:
+            import routing
+            return routing.handoff_intent(text)
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _on_recognized(self, text: str):
         """识别结果 → 发送给当前主脑 → 整体合成播报回复"""
         # 唤醒待决策：上一句问了"要不要继续"，这句就是回答。
@@ -2742,6 +3135,7 @@ class VoiceAssistant:
             else:  # new_command：搁置旧任务，把这句当新指令发引擎
                 self._abandon_previous_task()
 
+        original_handoff_intent = self._agent_handoff_intent(text)
         text = self._prepare_agent_text(text)
         agent_label = self._agent_label()
         print(f"\n[→ {agent_label}] {text}")
@@ -2959,6 +3353,7 @@ class VoiceAssistant:
                         on_start=_on_stream_start,
                         on_end=_on_stream_end,
                         on_tool_call=_on_stream_tool_call,
+                        force_agent_reason=original_handoff_intent,
                     )
                     self._waiting_active.clear()
                     waiting_thread.join(timeout=0.5)

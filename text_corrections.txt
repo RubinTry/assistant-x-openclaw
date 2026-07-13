@@ -6,3 +6,4 @@ TONY STOCK : Tony Stark
 TONY STOCKS : Tony Starks
 TONY STOCK. : Tony Stark.
 TONY STOCK, : Tony Stark,
+查韦斯 : 贾维斯
