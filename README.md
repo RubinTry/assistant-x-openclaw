@@ -8,6 +8,16 @@
 
 多角色 AI 语音助手，基于 sherpa-onnx 本地运行，通过 OpenClaw Gateway 对接大模型。支持多角色切换、语音唤醒、连续对话、TTS 播报和 HUD 视觉特效。语音识别和合成都跑在本地，LLM 走网关，隐私有保障。
 
+## 当前开发版主要更新
+
+- **Control Center 重构**：统一深色界面，新增全局配置、模型管理和服务层，完善声纹管理及跨平台窗口。
+- **前脑快路径**：支持模型配置与校验、快速路由、工具调用升级及角色人设注入。
+- **上下文连续性**：接入 Hermes 历史和本地语音上下文，区分软停止与硬取消，支持退下后继续未完成任务。
+- **唤醒链路升级**：VAD 配合持续 ASR，支持“唤醒词 + 指令”同句输入，并在唤醒瞬间植入连续指令前缀。
+- **身份验证增强**：使用 VAD 话语片段进行声纹与活体验证，补充媒体播放场景下的验证门禁。
+- **系统音频消除**：macOS 已可抑制本机 TTS 及其他应用声音；Windows 已统一接口标准，仍需实现 WASAPI Loopback helper。
+- **交互与配置完善**：新增打断词、灯效配置、Overlay/标题栏改进，并同步环境配置、依赖和热词。
+
 ## 开发进度
 
 - ✅ KWS 多角色唤醒(一次只能唤醒一个)
@@ -21,7 +31,6 @@
 - ✅ API 远程退出
 - ✅ 声纹识别（唤醒强制验证 + 对话中渐进更新）
 - ✅ 声音活体检测（AASIST-L，唤醒链路内置校验，配合声纹验证拦截录音/重放风险）
-- ✅ Jarvis 纯英文模式（中文语音本地实时翻译为英文后进入主脑链路）
 - 自定义角色（实验性阶段）
 
 ## 前置说明
@@ -297,7 +306,7 @@ cp .env.example .env
 OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 ```
 
-macOS 可选启用系统级回声消除。它使用整台设备的系统输出作为参考，既覆盖助手
+系统级回声消除使用整台设备的系统输出作为参考，既覆盖助手
 自身的 TTS，也覆盖浏览器、播放器等其他应用；不会改变任何应用的播放方式：
 
 ```bash
@@ -314,6 +323,12 @@ VOICE_ASSISTANT_SYSTEM_AEC_REFERENCE_DELIVERY_MS=80
 
 首次启动时需要授予“屏幕与系统音频录制”权限。helper 或 AEC 运行异常时会自动
 旁路，继续向现有 VAD、ASR、声纹和活体链路提供未经处理的原始麦克风音频。
+
+采集层遵循统一接口：`name`、`healthy`、`start(on_frame, on_status)`、`close()`；
+原生 helper 向 stdout 连续输出 48kHz、单声道、float32 little-endian、每帧 480
+samples（10ms）的 PCM，并在就绪后向 stderr 输出 `ready`。macOS 已由
+ScreenCaptureKit 实现；Windows 预留 `native/windows_system_audio_capture.exe`，
+后续只需用 WASAPI Loopback 实现同一协议，无需修改 AEC、ASR 或声纹链路。
 
 > **提示**：需在 `~/.openclaw/openclaw.json` 中确保 Gateway HTTP 端点已启用：
 
@@ -357,29 +372,12 @@ VOICE_ASSISTANT_SYSTEM_AEC_REFERENCE_DELIVERY_MS=80
 | 7 | VITS MeloTTS 模型（林妹妹中英文语音合成，内置角色必需） | [vits-melo-tts-zh_en.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2) |
 | 8 | 声纹嵌入模型（唤醒声纹验证与录入必需） | [3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx) |
 | 9 | 声音活体检测模型（AASIST-L，唤醒防录音/重放必需） | [aasist-l.onnx](https://modelscope.cn/datasets/rubintry/jarvis/resolve/master/%E5%A3%B0%E9%9F%B3%E6%B4%BB%E4%BD%93%E6%A3%80%E6%B5%8B/aasist-l.onnx) + [aasist-l.onnx.data](https://modelscope.cn/datasets/rubintry/jarvis/resolve/master/%E5%A3%B0%E9%9F%B3%E6%B4%BB%E4%BD%93%E6%A3%80%E6%B5%8B/aasist-l.onnx.data)（两个文件需同时放入 `models/` 目录） |
-| 10 | Jarvis 中文转英文实时翻译模型（`full_english_mode: true` 时必需） | [Helsinki-NLP/opus-mt-zh-en](https://huggingface.co/Helsinki-NLP/opus-mt-zh-en)（下载后按下方命令转换为 CTranslate2 int8，最终目录为 `models/translation/opus-mt-zh-en-ct2-int8`） |
-
 **可选模型（根据需求下载）：**
 
 | # | 模型 | 下载链接 |
 |---|------|----------|
-| 11 | Qwen3-ASR 离线识别模型（贾维斯默认 `asr_mode: "offline"` 使用，缺失自动回退流式识别） | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
-| 12 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
-
-Jarvis 纯英文模式的翻译模型转换示例：
-
-```bash
-# 先下载 Hugging Face 原始模型
-huggingface-cli download Helsinki-NLP/opus-mt-zh-en \
-  --local-dir models/translation/opus-mt-zh-en
-
-# 转成 CTranslate2 int8，供运行时低延迟加载
-ct2-transformers-converter \
-  --model models/translation/opus-mt-zh-en \
-  --output_dir models/translation/opus-mt-zh-en-ct2-int8 \
-  --quantization int8 \
-  --copy_files source.spm target.spm tokenizer_config.json vocab.json
-```
+| 10 | Qwen3-ASR 离线识别模型（贾维斯默认 `asr_mode: "offline"` 使用，缺失自动回退流式识别） | [sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2) |
+| 11 | ZipVoice TTS 模型（零样本声音克隆） | [sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2) |
 
 > **活体检测免责声明：** AASIST-L 已接入唤醒验证链路，用于判断唤醒音频是否像真人现场语音；但任何活体检测模型都不能保证 100% 拦截录音、合成语音或扬声器重放。实际效果会受麦克风、扬声器、房间环境、录入声纹质量和阈值设置影响；高安全场景请结合声纹验证、媒体播放门禁、重新录入声纹和本机样本校准后使用。
 
@@ -583,7 +581,6 @@ curl -X POST http://127.0.0.1:18790/exit
     },
     "keywords_file": "keywords/your-assistant.txt",
     "asr_mode": "streaming",
-    "full_english_mode": false,
     "tts_config": {
         "engine": "vits",
         "model_dir": "models/vits-melo-tts-zh_en",
@@ -608,10 +605,9 @@ curl -X POST http://127.0.0.1:18790/exit
   | `streaming`（默认） | 流式 Zipformer 中英双语 | 边说边出结果，低延迟，支持热词 |
   | `sense_voice` | SenseVoice 多语言（自动检测） | VAD 断句，一次返回完整结果 |
   | `sense_voice_en` | SenseVoice 英文模式 | 同上，仅英文 |
-  | `offline` | Qwen3-ASR 离线识别 | 需下载可选模型第 11 项 |
+  | `offline` | Qwen3-ASR 离线识别 | 需下载可选模型第 10 项 |
 
   对应模型不可用时自动回退到流式模式，不会启动失败。
-- **`full_english_mode`**：仅 Jarvis 使用。设为 `true` 时，中文 ASR 原文会先通过本地 `Helsinki-NLP/opus-mt-zh-en` CTranslate2 模型翻译为英文，再发送给 Hermes/OpenClaw；退出词、打断词、唤醒、声纹、活体等本地逻辑仍使用原文判断。其他 assistant 忽略该字段。
 - **`tts_config`**：TTS 引擎配置。`engine`/`model_dir` 指定引擎与模型，`speed` 调语速，贾维斯还支持 `metallic` 金属感后处理（见上方「贾维斯金属感语音」）。
 - **`restart_keywords`**：命中后重启整个语音助手（自动执行 `start.sh` / `start.bat`），带幂等保护防止回声重复触发。
 
@@ -917,7 +913,6 @@ assistant-x-openclaw/
 │   ├── dock_control.py       # 激活联动：唤醒时隐藏 Dock（macOS）
 │   ├── camera.py             # 摄像头抓帧（GET /camera/snapshot，macOS）
 │   ├── anti_spoof.py         # 声音活体检测（AASIST-L）
-│   ├── translation.py        # Jarvis 纯英文模式：本地中文转英文
 │   ├── notify_bridge.py      # 向控制中心推送通知（如声纹拒绝）
 │   ├── log_setup.py          # 日志：ERROR 落盘 + diag 诊断日志
 │   ├── audio.py              # 音频播放模块

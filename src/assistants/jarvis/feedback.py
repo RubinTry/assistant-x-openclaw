@@ -179,4 +179,3 @@ class JarvisFeedback(AssistantFeedback):
 
         t = threading.Thread(target=animate, daemon=True)
         t.start()
-        self._send_notification("JARVIS", "已进入待机模式", True)

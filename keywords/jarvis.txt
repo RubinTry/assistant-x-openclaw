@@ -10,3 +10,5 @@ JH AA1 R V IH1 S :2.0 #0.05 @Jarvis
 JH AA1 R W IH0 S :2.0 #0.05 @Jarvis
 JH AA1 V IH0 S :2.0 #0.05 @Jarvis
 JH AA1 R V AH0 Z :2.0 #0.05 @Jarvis
+JH AA1 R V AH0 S HH IH1 R :3.0 #0.05 @JarvisHere
+JH AA1 R V AH0 S DH EH1 R :3.0 #0.05 @JarvisThere

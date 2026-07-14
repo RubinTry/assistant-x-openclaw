@@ -21,7 +21,6 @@
             },
             "keywords_file": "keywords/jarvis.txt",
             "asr_mode": "offline",
-            "full_english_mode": false,
             "tts_configs": {
                 "jarvis": {
                     "metallic": {

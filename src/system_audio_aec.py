@@ -1,15 +1,8 @@
-"""Optional macOS system-output echo cancellation.
-
-The capture helper streams the entire macOS output mix (including other apps)
-as 48 kHz mono float32 PCM.  Any initialization/runtime failure leaves the
-existing microphone path untouched.
-"""
+"""Platform-neutral system-output echo cancellation."""
 
 from __future__ import annotations
 
 import importlib
-import os
-import subprocess
 import sys
 import threading
 import time
@@ -17,6 +10,8 @@ from collections import deque
 from pathlib import Path
 
 import numpy as np
+
+from system_audio_reference import SystemAudioReferenceProvider
 
 
 def _load_audio_processor():
@@ -50,15 +45,30 @@ class SystemAudioAEC:
 
     def __init__(
         self,
-        helper_path: str,
+        reference_provider: SystemAudioReferenceProvider,
         delay_ms: int = 100,
         reference_delivery_ms: int = 80,
         diagnostics_seconds: float = 0.0,
     ):
-        if sys.platform != "darwin":
-            raise RuntimeError("system-output AEC is currently available on macOS only")
-
+        provider_format = (
+            reference_provider.sample_rate,
+            reference_provider.channels,
+            reference_provider.frame_samples,
+            np.dtype(reference_provider.sample_dtype),
+        )
+        required_format = (
+            self.sample_rate,
+            1,
+            self.frame_samples,
+            np.dtype("<f4"),
+        )
+        if provider_format != required_format:
+            raise ValueError(
+                f"system audio reference format {provider_format} does not match "
+                f"required {required_format}"
+            )
         AudioProcessor = _load_audio_processor()
+        self._reference_provider = reference_provider
         self._processor = AudioProcessor(
             enable_aec=True,
             enable_ns=False,
@@ -88,52 +98,41 @@ class SystemAudioAEC:
         self._stats_render_energy = 0.0
         self._stats_samples = 0
         self._closed = False
-        self._healthy = False
-        self._process = subprocess.Popen(
-            [os.path.abspath(helper_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-        )
-        self._reader = threading.Thread(target=self._read_render, daemon=True)
-        self._reader.start()
-        self._stderr_reader = threading.Thread(target=self._read_stderr, daemon=True)
-        self._stderr_reader.start()
+        self._processing_failed = False
+        self._reference_provider.start(self._on_render_frame, self._on_provider_status)
 
     @property
     def healthy(self) -> bool:
-        return self._healthy and self._process.poll() is None and not self._closed
+        return (
+            self._reference_provider.healthy
+            and not self._processing_failed
+            and not self._closed
+        )
 
-    def _read_stderr(self):
-        assert self._process.stderr is not None
-        for raw in iter(self._process.stderr.readline, b""):
-            message = raw.decode("utf-8", "replace").strip()
-            if message == "ready":
-                self._healthy = True
-                print("[系统 AEC] helper ready，等待系统音频参考帧")
-            elif message:
-                print(f"[系统 AEC helper] {message}")
+    @property
+    def reference_provider_name(self) -> str:
+        return self._reference_provider.name
 
-    def _read_render(self):
-        assert self._process.stdout is not None
-        frame_bytes = self.frame_samples * np.dtype("<f4").itemsize
-        pending = bytearray()
-        while not self._closed:
-            chunk = self._process.stdout.read(4096)
-            if not chunk:
-                break
-            pending.extend(chunk)
-            while len(pending) >= frame_bytes:
-                frame = bytes(pending[:frame_bytes])
-                del pending[:frame_bytes]
-                with self._render_lock:
-                    self._render.append(frame)
-                    self._render_frame_count += 1
-                    if self._render_frame_count == 1:
-                        print("[系统 AEC] 已收到首帧系统音频参考")
-                    while len(self._render) > 50:
-                        self._render.popleft()
-        self._healthy = False
+    def _on_provider_status(self, message: str) -> None:
+        if message == "ready":
+            print(
+                f"[系统 AEC] {self.reference_provider_name} ready，"
+                "等待系统音频参考帧"
+            )
+        else:
+            print(f"[系统 AEC/{self.reference_provider_name}] {message}")
+
+    def _on_render_frame(self, frame: np.ndarray) -> None:
+        render = np.asarray(frame, dtype=np.float32).reshape(-1)
+        if len(render) != self.frame_samples:
+            return
+        with self._render_lock:
+            self._render.append(render.copy())
+            self._render_frame_count += 1
+            if self._render_frame_count == 1:
+                print("[系统 AEC] 已收到首帧系统音频参考")
+            while len(self._render) > 50:
+                self._render.popleft()
 
     @staticmethod
     def _to_pcm16(frame: np.ndarray) -> bytes:
@@ -166,7 +165,7 @@ class SystemAudioAEC:
                         self._render.clear()
                         self._render_synced = True
                     else:
-                        # ScreenCaptureKit 与 PortAudio 使用独立音频时钟，长时间运行
+                        # 系统参考采集器与 PortAudio 使用独立音频时钟，长时间运行
                         # 后参考队列会缓慢漂移。超过 8 帧时丢弃最旧参考并回落到
                         # 4 帧左右，避免 AEC 拿数百毫秒前的系统声处理当前麦克风。
                         if len(self._render) > 8:
@@ -177,12 +176,10 @@ class SystemAudioAEC:
                         render = self._render.popleft() if self._render else None
                 if render is None:
                     self._render_underruns += 1
-                    render = bytes(self.frame_samples * 4)
+                    render_f32 = np.zeros(self.frame_samples, dtype=np.float32)
                 else:
                     self._render_consumed += 1
-                render_f32 = np.frombuffer(
-                    render, dtype="<f4", count=self.frame_samples
-                )
+                    render_f32 = render
                 self._processor.process_reverse_stream(self._to_pcm16(render_f32))
                 self._processor.set_stream_delay(self._delay_ms)
                 cleaned = self._processor.process_stream(self._to_pcm16(mic))
@@ -227,11 +224,10 @@ class SystemAudioAEC:
                 self._render_dropped = 0
             return output
         except Exception as exc:
-            self._healthy = False
+            self._processing_failed = True
             print(f"[系统 AEC] 处理失败，已旁路原始麦克风: {exc}")
             return original
 
     def close(self):
         self._closed = True
-        if self._process.poll() is None:
-            self._process.terminate()
+        self._reference_provider.close()

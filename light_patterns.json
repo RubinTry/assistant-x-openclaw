@@ -182,10 +182,12 @@
       ]
     },
     "wellbeing_chitchat": {
-      "description": "状态寒暄 / 情绪寒暄",
+      "description": "状态寒暄 / 情绪寒暄及其常见回应",
       "regex": [
         "^\\s*(你(还)?好(吗|嘛)|你怎么样|你最近怎么样|你状态怎么样|你忙吗|你累吗|你开心吗|今天状态如何|感觉怎么样)(呀|啊|呢|啦)?[!.。！?？,， ]*$",
-        "^\\s*(how\\s+are\\s+you|how'?s\\s+it\\s+going|are\\s+you\\s+ok|you\\s+alright|how\\s+do\\s+you\\s+feel)[!.。！?？,， ]*$"
+        "^\\s*(how\\s+are\\s+you|how'?s\\s+it\\s+going|are\\s+you\\s+ok|you\\s+alright|how\\s+do\\s+you\\s+feel)[!.。！?？,， ]*$",
+        "^\\s*((我|我这边)?(没事|挺好|挺好的|很好|还好|还不错|还可以|蛮好|一切(都)?(好|正常|安好|顺利)|都挺好|都挺好的|状态不错)|没什么事)(呀|啊|呢|啦|哈)?([,， ]*(谢谢|多谢|谢谢你))?[!.。！?？,， ]*$",
+        "^\\s*((yes|yeah|yep)[, ]+)?((i('?m|\\s+am)\\s+)?(doing\\s+)?(very\\s+|pretty\\s+|quite\\s+)?(fine|good|great|okay|ok|alright|all\\s+right|well|all\\s+good|not\\s+(too\\s+)?bad)|everything('?s|\\s+is)?\\s+(all\\s+)?(fine|good|okay|ok|alright|all\\s+right)|so\\s+far\\s+so\\s+good|could(n't|\\s+not)\\s+be\\s+better)([, ]+(thanks|thank\\s+you))?[!.。！?？,， ]*$"
       ]
     },
     "who_are_you": {

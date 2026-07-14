@@ -172,8 +172,10 @@ except ImportError:
 
 try:
     from system_audio_aec import SystemAudioAEC
+    from system_audio_reference import create_system_audio_reference_provider
 except ImportError:
     SystemAudioAEC = None
+    create_system_audio_reference_provider = None
 
 from tts import (
     text_to_speech_play,
@@ -663,16 +665,6 @@ def _batch_sentences(text: str, sent_end: str, max_sentences: int = 4):
         batches.append(tail)
     return batches
 
-
-def _short_log_text(text: str, limit: int = 160) -> str:
-    import re
-
-    text = re.sub(r"\s+", " ", (text or "")).strip()
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "..."
-
-
 class VoiceAssistant:
     def __init__(
         self, args, default_cfg: dict, all_assistants: list, keyword_mapping: dict
@@ -706,27 +698,19 @@ class VoiceAssistant:
         self._asr_rate = 16000
         self._system_audio_aec = None
         if _env_bool("VOICE_ASSISTANT_SYSTEM_AEC_ENABLED", False):
-            helper = os.path.abspath(
-                os.getenv(
-                    "VOICE_ASSISTANT_SYSTEM_AEC_HELPER",
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "..",
-                        "native",
-                        "macos_system_audio_capture",
-                    ),
-                )
-            )
             try:
-                if SystemAudioAEC is None:
+                if SystemAudioAEC is None or create_system_audio_reference_provider is None:
                     raise RuntimeError("system_audio_aec 模块不可用")
-                if not os.path.isfile(helper) or not os.access(helper, os.X_OK):
-                    raise RuntimeError(
-                        f"helper 不存在或不可执行: {helper}；请先运行 "
-                        "scripts/build_macos_system_audio_capture.sh"
-                    )
-                self._system_audio_aec = SystemAudioAEC(
+                helper = os.getenv("VOICE_ASSISTANT_SYSTEM_AEC_HELPER") or None
+                project_root = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..")
+                )
+                reference_provider = create_system_audio_reference_provider(
+                    project_root=project_root,
                     helper_path=helper,
+                )
+                self._system_audio_aec = SystemAudioAEC(
+                    reference_provider=reference_provider,
                     delay_ms=_env_int("VOICE_ASSISTANT_SYSTEM_AEC_DELAY_MS", 100),
                     reference_delivery_ms=_env_int(
                         "VOICE_ASSISTANT_SYSTEM_AEC_REFERENCE_DELIVERY_MS", 80
@@ -735,7 +719,11 @@ class VoiceAssistant:
                         "VOICE_ASSISTANT_SYSTEM_AEC_DIAGNOSTICS_SECONDS", 0.0
                     ),
                 )
-                print("[系统 AEC] helper 进程已拉起，等待系统音频参考就绪")
+                print(
+                    "[系统 AEC] "
+                    f"{self._system_audio_aec.reference_provider_name} 已启动，"
+                    "等待系统音频参考就绪"
+                )
             except Exception as exc:
                 print(f"[系统 AEC] 启动失败，继续使用原始麦克风: {exc}")
                 self._system_audio_aec = None
@@ -756,6 +744,9 @@ class VoiceAssistant:
         self.last_voice_time = time.time()
         self.idle_timeout = _env_float("VOICE_ASSISTANT_IDLE_TIMEOUT_SECONDS", 30.0)
         self.last_activity_time = time.time()
+        # 音频设备健康心跳必须与业务活动时间分离：即使无人说话，PortAudio
+        # 回调也会持续送静音帧。看门狗只依据此单调时钟判断输入流是否假死。
+        self._last_audio_callback_monotonic = time.monotonic()
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
         self._wake_speaker_audio_buffer = []  # AEC 前同帧音频，仅供声纹比对
         self._wake_buffer_max_samples = int(self._asr_rate * 3)  # 最多存3秒（16kHz）
@@ -2086,6 +2077,7 @@ class VoiceAssistant:
 
     def _audio_callback(self, indata, frames, time_info, status):
         """音频回调函数"""
+        self._last_audio_callback_monotonic = time.monotonic()
         if status:
             print(status)
         queued_audio = indata.copy()
@@ -2204,6 +2196,8 @@ class VoiceAssistant:
                 threading.Thread(target=_close_old, args=(old,), daemon=True).start()
             self._clear_queue()
             start_audio_stream()
+            # 给新流一个完整的启动宽限期；首个回调到达后会刷新此心跳。
+            self._last_audio_callback_monotonic = time.monotonic()
 
         def _create_vad_stream():
             nonlocal vad_stream
@@ -2326,14 +2320,14 @@ class VoiceAssistant:
                     except queue.Empty:
                         # 处理期间麦克风假死会让打断监听失效；重建音频流以恢复，
                         # 但不动 _is_processing 等标志（由请求/TTS 线程负责复位）。
-                        if time.time() - self.last_activity_time > _AUDIO_STALL_TIMEOUT:
+                        stalled = (
+                            time.monotonic()
+                            - self._last_audio_callback_monotonic
+                        )
+                        if stalled > _AUDIO_STALL_TIMEOUT:
                             print("[看门狗] 处理期间音频流假死，重建以恢复打断监听...")
-                            stop_audio_stream()
-                            time.sleep(0.1)
-                            self._clear_queue()
+                            reset_audio_stream()
                             keyword_stream = self.keyword_spotter.create_stream()
-                            start_audio_stream()
-                            time.sleep(0.1)
                             self._clear_queue()
                             self.last_activity_time = time.time()
                         continue
@@ -2393,7 +2387,10 @@ class VoiceAssistant:
                     # 音频流假死兜底：不论待机还是已唤醒，只要持续拿不到帧就重建。
                     # 旧逻辑仅在 not is_awake 时重建，导致"唤醒态麦克风假死"时主循环
                     # 在此处静默空转——既不打印日志、回不了待机、也唤不醒。
-                    stalled = time.time() - self.last_activity_time
+                    stalled = (
+                        time.monotonic()
+                        - self._last_audio_callback_monotonic
+                    )
                     if stalled > _AUDIO_STALL_TIMEOUT:
                         was_awake = self.is_awake
                         print(
@@ -2406,12 +2403,8 @@ class VoiceAssistant:
                             self.continuous_mode = False
                             recognition_stream = None
                             recognition_result = ""
-                        stop_audio_stream()
-                        time.sleep(0.1)
-                        self._clear_queue()
+                        reset_audio_stream()
                         keyword_stream = self.keyword_spotter.create_stream()
-                        start_audio_stream()
-                        time.sleep(0.1)
                         self._clear_queue()
                         self.last_activity_time = time.time()
                         print("[看门狗] 音频流已重建，等待唤醒词...")
@@ -3371,54 +3364,6 @@ class VoiceAssistant:
             except Exception:  # noqa: BLE001
                 pass
 
-    def _prepare_agent_text(self, text: str) -> str:
-        """Jarvis full-English mode: translate Chinese before agent routing."""
-        # 组合唤醒指令的协议前缀必须原样保留，只翻译后面的自然语言任务。
-        if text.startswith("voice-assistant-wake-up-") and "\n" in text:
-            wake_prefix, command = text.split("\n", 1)
-            return f"{wake_prefix}\n{self._prepare_agent_text(command)}"
-        if self.current_cfg.get("id") != "jarvis":
-            return text
-        if not self.current_cfg.get("full_english_mode", False):
-            return text
-        try:
-            from translation import contains_cjk, translate_to_english
-        except Exception as e:  # noqa: BLE001
-            print(f"[语言模式] 翻译模块不可用，保持原文: {e}")
-            return text
-
-        if not contains_cjk(text):
-            return text
-
-        try:
-            import routing
-            original_needs_live_data = routing.needs_live_data(text)
-        except Exception:  # noqa: BLE001
-            routing = None
-            original_needs_live_data = False
-
-        result = translate_to_english(text)
-        print("[语言模式] english")
-        print(f"[翻译] zh->en {result.latency_ms}ms")
-        print(f"[翻译] 原文: {_short_log_text(result.original_text)}")
-        if result.success and result.translated_text:
-            translated = result.translated_text
-            if (
-                original_needs_live_data
-                and routing is not None
-                and not routing.needs_live_data(translated)
-            ):
-                translated = f"Current live-data request: {translated}"
-            print(f"[翻译] EN: {_short_log_text(translated)}")
-            return translated
-
-        fallback = (
-            "Sorry, sir. The local translator failed, so I will not send the "
-            "Chinese request to Jarvis."
-        )
-        print(f"[翻译] 失败: {result.error or 'unknown'}")
-        return fallback
-
     @staticmethod
     def _agent_handoff_intent(text: str) -> str:
         try:
@@ -3447,7 +3392,6 @@ class VoiceAssistant:
                 self._abandon_previous_task()
 
         original_handoff_intent = self._agent_handoff_intent(text)
-        text = self._prepare_agent_text(text)
         agent_label = self._agent_label()
         print(f"\n[→ {agent_label}] {text}")
 
