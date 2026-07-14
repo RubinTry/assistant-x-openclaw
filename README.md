@@ -8,12 +8,13 @@
 
 [嗯？你想开发自己的特效？请看这里](./docs/overlay_develop.md)
 
-多角色 AI 语音助手，基于 sherpa-onnx 本地运行，通过 OpenClaw Gateway 对接大模型。支持多角色切换、语音唤醒、连续对话、TTS 播报和 HUD 视觉特效。语音识别和合成都跑在本地，LLM 走网关，隐私有保障。
+多角色 AI 语音助手，基于 sherpa-onnx 本地运行，默认使用项目内置的 **Edwin Agent 引擎**，也可切换 OpenClaw 或 Hermes。支持多角色切换、语音唤醒、连续对话、工具执行、TTS 播报和 HUD 视觉特效。
 
 ## 主要更新
 
 - **Control Center 重构**：统一深色界面，新增全局配置、模型管理和服务层，完善声纹管理及跨平台窗口。
-- **前脑快路径**：支持模型配置与校验、快速路由、工具调用升级及角色人设注入。
+- **Edwin 内置主脑**：项目自带 Agent 工具循环、SQLite 会话/记忆、Skill 读取、权限分级与语音审批，不依赖外部 Agent 网关。
+- **前脑快速路由**：支持模型配置与校验、快速路由、工具调用升级及角色人设注入。
 - **上下文连续性**：接入 Hermes 历史和本地语音上下文，区分软停止与硬取消，支持退下后继续未完成任务。
 - **唤醒链路升级**：VAD 配合持续 ASR，支持“唤醒词 + 指令”同句输入，并在唤醒瞬间植入连续指令前缀。
 - **身份验证增强**：使用 VAD 话语片段进行声纹与活体验证，补充媒体播放场景下的验证门禁。
@@ -37,9 +38,9 @@
 
 ## 前置说明
 
-每个 assistant 角色对应一个 OpenClaw Agent。在 `assistants.json` 中配置角色时，需要把 `id` 字段设为你事先在 OpenClaw 中创建好的 Agent ID。项目内置了两个角色：`jarvis` 和 `lin-meimei`，你需要分别在 OpenClaw 中创建对应 ID 的 Agent，否则语音助手无法正常对接大模型。
+默认 Edwin 模式不需要安装 OpenClaw 或 Hermes。先在 Control Center 的“模型路由”中添加一个支持原生工具调用的 OpenAI-compatible 模型，并分别选择快速路由与 Edwin 模型即可。
 
-> ⚠️ **前提条件**：请确保你已经安装 OpenClaw 并能正常运行。安装请参考 [OpenClaw 官方文档](https://docs.openclaw.ai)。
+只有切换到 `engine=openclaw` 时，每个 assistant 角色才需要对应一个 OpenClaw Agent；此时请确保 OpenClaw 已安装并正常运行，并让 Agent ID 与 `assistants.json` 的角色 ID 一致。
 
 ```shell
 # 创建贾维斯智能体
@@ -238,17 +239,16 @@ openclaw devices list
 │  │ 音效+HUD+通知    │    │      VITS MeloTTS)     │  │
 │  └─────────────────┘    └───────────────────────┘  │
 └──────────────────────────┬──────────────────────────┘
-                          │ LLM 推理（engine 二选一）
-            ┌──────────────┴───────────────┐
-            ▼                               ▼
-┌───────────────────────┐    ┌──────────────────────────┐
-│ OpenClaw Gateway      │    │ Hermes 本地网关           │
-│ engine=openclaw（默认）│    │ engine=hermes            │
-│ openclaw_bridge_ws    │    │ 一角色一 profile / 网关   │
-└───────────────────────┘    └──────────────────────────┘
+                          │ LLM / Agent 推理（engine 三选一）
+            ┌─────────────┼──────────────────┐
+            ▼             ▼                  ▼
+┌───────────────────┐ ┌────────────────┐ ┌────────────────┐
+│ Edwin（进程内默认）│ │ OpenClaw 网关  │ │ Hermes 网关    │
+│ engine=edwin      │ │ engine=openclaw│ │ engine=hermes  │
+└───────────────────┘ └────────────────┘ └────────────────┘
 ```
 
-> 主脑引擎由 `assistants.json` 顶层 `engine` 字段切换：缺省/未知值走 **OpenClaw**（默认），填 `hermes` 则走本地 Hermes。Hermes 链路详见 [hermes-assistant.md](./hermes-assistant.md)。
+> 主脑引擎由 `assistants.json` 顶层 `engine` 字段切换：缺省/未知值走项目内置的 **Edwin**。详见 [Edwin 使用与架构](./docs/edwin.md)；Hermes 链路见 [hermes-assistant.md](./hermes-assistant.md)。
 
 ## 快速开始
 
@@ -673,19 +673,20 @@ l i n m e i m e i z a i m a :3.0 #0.02 @林妹妹在吗
 
 > **音效格式建议**：16-bit, 44100Hz, 单声道，长度 0.5-2 秒
 
-### 主脑引擎选择（OpenClaw / Hermes）
+### 主脑引擎选择（Edwin / OpenClaw / Hermes）
 
 `assistants.json` **顶层** `engine` 字段决定用哪个主脑引擎对接大模型：
 
 ```json
 {
-    "engine": "openclaw",   // 默认；可选 "hermes"
+    "engine": "edwin",   // 默认；也可选 "openclaw"、"hermes"
     "default": "jarvis",
     "assistants": [ ... ]
 }
 ```
 
-- `openclaw`（默认，缺省或未知值都回退到它）：走 OpenClaw Gateway。
+- `edwin`（默认，缺省或未知值都回退到它）：项目内置 Agent Runtime，无外部网关，详见 [docs/edwin.md](./docs/edwin.md)。
+- `openclaw`：走 OpenClaw Gateway。
 - `hermes`：本地 Hermes 作主脑，一角色一 profile 一网关。配置/启动/排错见
   [hermes-assistant.md](./hermes-assistant.md)。
 
@@ -906,6 +907,8 @@ curl -s http://127.0.0.1:18790/camera/snapshot -o /tmp/cam.jpg   # 成功：JPEG
 assistant-x-openclaw/
 ├── src/                      # 源代码
 │   ├── main.py               # 主程序：唤醒 + 声纹验证 + 识别 + 对话流程 + 本地 API
+│   ├── edwin/                # 内置 Agent Runtime（模型/工具/记忆/Skill/权限）
+│   ├── edwin_bridge.py       # Edwin 与现有语音流的桥接（engine=edwin）
 │   ├── tts.py                # TTS 统一接口
 │   ├── tts_vits.py           # VITS TTS 引擎
 │   ├── openclaw_bridge_websocket.py  # OpenClaw Gateway 桥接（engine=openclaw）

@@ -521,7 +521,7 @@ class HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Voice runtime, identity gate, and fast-path model routing',
+                      'Voice runtime, identity gate, and FastRouter model routing',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -634,10 +634,10 @@ class HomePageState extends State<HomePage> {
               Expanded(
                 child: _hudStatusCard(
                   icon: Icons.bolt,
-                  title: '快路径',
+                  title: '快速路由',
                   body: '轻消息直答，重任务升级主脑',
                   footerLabel: '路由状态',
-                  footerValue: '快路径',
+                  footerValue: '快速路由',
                   color: AppColors.warning,
                   visual: const _OrbitDisplay(color: AppColors.warning),
                 ),
@@ -798,7 +798,9 @@ class HomePageState extends State<HomePage> {
     final speakerPass = _logs.any(
       (log) => log.message.contains('声纹') && log.message.contains('验证通过'),
     );
-    final fastHits = _logs.where((log) => log.message.contains('快路径')).length;
+    final routerHits = _logs
+        .where((log) => log.message.contains('快速路由'))
+        .length;
     final brainCalls = _logs
         .where(
           (log) =>
@@ -832,7 +834,7 @@ class HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(width: 14),
-          Expanded(child: _metricCard(Icons.bolt, '快路径命中', '$fastHits 次')),
+          Expanded(child: _metricCard(Icons.bolt, '快速路由命中', '$routerHits 次')),
           const SizedBox(width: 14),
           Expanded(
             child: _metricCard(

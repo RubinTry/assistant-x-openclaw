@@ -221,7 +221,7 @@ class OpenClawBridgeWebSocket:
         return self._send_abort("打断（软停止）")
 
     def cancel_task(self) -> bool:
-        """硬取消：快路径识别到「中断任务」意图时调用。
+        """硬取消：快速路由识别到「中断任务」意图时调用。
 
         断开 WebSocket 连接，触发 agent 清理浏览器等后台资源。
         """

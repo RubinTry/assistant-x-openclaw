@@ -1,4 +1,6 @@
 # 核心依赖
+# torch 2.11 的构建/运行元数据要求 setuptools<82；固定上限避免 pip 重装后冲突
+setuptools<82
 numpy>=1.21.0
 librosa>=0.9.0
 sounddevice>=0.4.0
@@ -17,8 +19,19 @@ onnxruntime>=1.20.0
 # 金属感语音后处理用：自带跨平台静态 ffmpeg 二进制，免系统安装/PATH
 imageio-ffmpeg>=0.4.9
 
-# OpenClaw 桥接
-requests>=2.28.0
+# Edwin 内置屏幕读取：Pillow 截屏 + macOS Vision OCR，不依赖 Homebrew CLI
+pillow>=10.0.0
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
+pyobjc-framework-Vision>=10.0; sys_platform == "darwin"
+
+# Agent 引擎、Skills 与外部桥接共享依赖
+# Edwin 模型 Provider、模型能力探针和快速路由（OpenAI-compatible tool calling）
 openai>=1.0.0
-websocket-client>=1.6.0   # WebSocket 桥 (import websocket)
-cryptography>=41.0.0      # WebSocket 桥设备签名 (Ed25519)
+# Edwin web_search/CDP HTTP、Hermes/OpenClaw HTTP 桥
+requests>=2.28.0
+# Edwin Chrome CDP 与 OpenClaw WebSocket 桥（import websocket）
+websocket-client>=1.6.0
+# OpenClaw 设备签名及本地模型表凭据加密（Ed25519/Fernet）
+cryptography>=41.0.0
+# Edwin 跨平台只读系统健康/进程/磁盘/网络采集，避免依赖 top/df 等系统 CLI
+psutil>=5.9.0

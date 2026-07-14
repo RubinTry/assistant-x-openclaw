@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-快路径白名单路由。
+快速路由白名单路由。
 
 策略：
   - 命中 light_patterns.json 的 agent_intents 时，强制走 agent。
-  - 只有 light_patterns.json 明确命中的轻消息，才允许进入快路径。
+  - 只有 light_patterns.json 明确命中的轻消息，才允许进入快速路由。
   - 其余消息默认走 agent。
 
 这样 heavy_patterns.json 不再承担“补漏所有重意图”的职责；系统默认安全地进 agent。
@@ -55,11 +55,11 @@ def needs_live_data(text: str) -> bool:
 
 
 def is_obviously_light(text: str) -> bool:
-    """明确允许快路径处理返回 True；否则 False（默认走 agent）。"""
+    """明确允许快速路由处理返回 True；否则 False（默认走 agent）。"""
     if not text:
         return False
     # 唤醒前缀/问候可能与真实指令处于同一句。实时外部数据请求必须优先于
-    # 轻消息命中，否则诸如“Jarvis，目前世界杯情况怎么样”会被误送快路径。
+    # 轻消息命中，否则诸如“Jarvis，目前世界杯情况怎么样”会被误送快速路由。
     if needs_live_data(text):
         return False
     import light_store

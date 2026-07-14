@@ -1,6 +1,6 @@
 ---
 name: desktop-control
-description: "像 Claude 一样控制 macOS 桌面：截屏、定位 UI 元素、点击、键盘输入、热键、拖拽、管理应用/窗口/菜单。底层复用 Peekaboo CLI，复用 OpenClaw App 的录屏与辅助功能授权。"
+description: "使用 Edwin 的桌面工具读取和控制 macOS：截屏、读取界面文字、定位 UI 元素、点击、输入、热键、拖拽和管理窗口。"
 metadata:
   openclaw:
     emoji: "🖱️"
@@ -23,31 +23,32 @@ metadata:
 当主人要求"看屏幕 / 操作某个 app / 点某个按钮 / 帮我输入 / 打开某窗口"等桌面级操作时使用本技能。
 底层是 [Peekaboo](https://peekaboo.boo) —— 一个完整的 macOS UI 自动化 CLI。
 
-## 0. 必须先配 Bridge（关键，否则没授权）
+## 0. 权限由工具主动申请
 
-OpenClaw App 已经拿到了「录屏 Screen Recording」和「辅助功能 Accessibility」授权。
-让 Peekaboo 复用这套授权，而不是另起独立 daemon：
+不要在回复中预先要求主人配置录屏、辅助功能或 OpenClaw Bridge，也不要只给授权教程。
+读取当前屏幕时直接调用内置 `read_screen`；它通过 Pillow + macOS Vision 完成本地截屏和
+OCR，不依赖 Peekaboo。其他观察或控制任务调用 `desktop_observe` 或 `desktop_control`，
+后两者将 Peekaboo 作为可选高级后端。Edwin 工具会检查权限并主动触发 macOS 系统授权；必要时会
+打开对应的系统设置页面。只有工具明确返回系统请求已发起后，才简短请主人批准系统弹窗，
+获批后再次调用原工具。
 
-```bash
-export PEEKABOO_BRIDGE_SOCKET="${PEEKABOO_BRIDGE_SOCKET:-$HOME/Library/Application Support/OpenClaw/bridge.sock}"
-peekaboo bridge status --json   # hostKind 必须是 gui，socket 路径须以 OpenClaw/bridge.sock 结尾
-```
-
-若 `hostKind` 不是 `gui`，先排查 OpenClaw App 是否在运行、是否已授予录屏+辅助功能。
-
-所有命令都支持 `--json` / `-j` 便于脚本解析。不确定参数就 `peekaboo <cmd> --help`。
+Edwin 不依赖 OpenClaw、Claude 或其他 GUI Bridge。
+没有明确指定保存路径的 `see/image` 截图由 Edwin 作为临时文件管理；读取出结构化结果后，
+无论成功、失败还是取消都会立即删除。只有主人明确要求保存截图或指定 `--path` 时才保留。
 
 ## 1. 操作循环：先看清，再动手
 
-1. **看**：先用 `image`（截屏）或 `list`（列 apps/windows/screens）搞清当前界面，**不要盲点坐标**。
+1. **看**：优先调用内置 `read_screen`，它会返回带归一化 `[x=...,y=...]` 中心坐标的 OCR 行，**不要盲点坐标**。
 2. **定位**：用元素查询或坐标锁定目标。
-3. **动作**：`click` / `type` / `hotkey` / `paste` / `move` / `drag`。
+3. **动作**：普通点击优先调用内置 `click_screen`；复杂语义操作才使用可选 Peekaboo 后端。
 4. **复核**：动作后再 `image` 一次确认结果（导航、提交、弹窗后尤其要重看）。
 
 ## 2. 常用命令速查
 
 观察
 - `peekaboo image` — 截屏（整屏 / 指定 window / 菜单栏区域）
+- `peekaboo see` — 截屏并返回可交互 UI 元素与文字，读取屏幕内容时优先使用
+- `peekaboo inspect-ui` — 读取前台 App 的辅助功能树文本
 - `peekaboo list apps|windows|screens|menubar|permissions` — 枚举
 - `peekaboo permissions` — 查录屏/辅助功能状态
 
@@ -62,9 +63,9 @@ peekaboo bridge status --json   # hostKind 必须是 gui，socket 路径须以 O
 
 应用/窗口/菜单管理见 `peekaboo --help`。
 
-## 3. 兜底：无 GUI Bridge 授权时
+## 3. 兜底
 
-若 `peekaboo bridge status` 拿不到 GUI 授权，可降级用系统自带工具（能力弱，**只能按坐标**，无 UI 元素语义）：
+若 Peekaboo 本地模式执行失败且不是等待系统授权，可降级用系统自带工具（能力弱，**只能按坐标**，无 UI 元素语义）：
 
 - 截屏：`screencapture -x /tmp/shot.png`（已装）
 - 鼠标键盘：`cliclick`（已装，`/opt/homebrew/bin/cliclick`）
@@ -76,7 +77,7 @@ peekaboo bridge status --json   # hostKind 必须是 gui，socket 路径须以 O
 
 ## 4. 安全规则（强制）
 
-- **破坏性 / 不可逆操作必须先获主人确认**：删除文件、清空、发送消息/邮件、提交表单、移动/覆盖文件、退出未保存的应用等——先把要做的事说清楚，得到主人批准再执行。
+- 用户明确要求的播放、暂停、选择、导航等普通本地点击已经获得授权，不要重复确认。删除、清空、发送消息/邮件、提交表单、购买、移动/覆盖文件、退出未保存应用等高影响操作必须逐次确认。
 - 不自行提权（sudo）。需要提权的，把命令交给主人自己执行。
 - 操作完成后用截屏或 `list` 复核，确认"目标状态真的达成"，不要只凭命令返回的 success 就当成功。
 - 与 jarvis `TOOLS.md` 的「敏感操作规则」一致。

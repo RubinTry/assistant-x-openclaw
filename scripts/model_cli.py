@@ -14,6 +14,7 @@
   model_cli.py upsert      < payload.json     # 完整条目（含明文 api_key）
   model_cli.py delete      < payload.json     # {id}
   model_cli.py current     < payload.json     # {id}
+  model_cli.py agent-current < payload.json   # {id}
 
 含密文/明文 key 的入参一律走 stdin，避免出现在进程 argv（ps 可见）里。
 """
@@ -66,6 +67,10 @@ def main(argv) -> None:
         elif cmd == "current":
             body = _read_stdin_json()
             _emit(model_store.set_current((body.get("id") or "").strip()))
+
+        elif cmd == "agent-current":
+            body = _read_stdin_json()
+            _emit(model_store.set_agent_current((body.get("id") or "").strip()))
 
         elif cmd == "validate":
             import model_probe

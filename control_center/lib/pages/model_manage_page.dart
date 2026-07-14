@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/model_service.dart';
 import '../theme.dart';
 
-/// 快路径模型管理页。
+/// 快速路由模型管理页。
 ///
 /// 模型表存在 Python 后端（加密落盘）；本页只经 18790 端点读写明文。
 /// 关键约束：**保存前必须通过能力探针**——不支持工具调用的模型会被拦下
@@ -53,6 +53,19 @@ class _ModelManagePageState extends State<ModelManagePage> {
       await _reload();
     } catch (e) {
       _snack('切换失败：$e');
+    }
+  }
+
+  Future<void> _setAgentCurrent(ModelEntry entry) async {
+    if (entry.provider.toLowerCase() == 'openai-codex') {
+      _snack('OpenAI Codex CLI 不能作为 Edwin Agent 模型');
+      return;
+    }
+    try {
+      await _service.setAgentCurrent(entry.id);
+      await _reload();
+    } catch (e) {
+      _snack('切换 Edwin 模型失败：$e');
     }
   }
 
@@ -145,11 +158,12 @@ class _ModelManagePageState extends State<ModelManagePage> {
     if (models.isEmpty) {
       return const _EmptyState(
         icon: Icons.bolt_outlined,
-        title: '还没有配置快路径模型',
+        title: '还没有配置快速路由模型',
         subtitle: '点右下角「添加模型」，须通过工具调用校验才能保存',
       );
     }
     final current = _table?.current;
+    final agentCurrent = _table?.agentCurrent;
     return Column(
       children: [
         _buildInfoBar(models.length),
@@ -158,8 +172,11 @@ class _ModelManagePageState extends State<ModelManagePage> {
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 96),
             itemCount: models.length,
             separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (_, i) =>
-                _buildTile(models[i], models[i].id == current),
+            itemBuilder: (_, i) => _buildTile(
+              models[i],
+              models[i].id == current,
+              models[i].id == agentCurrent,
+            ),
           ),
         ),
       ],
@@ -186,7 +203,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '快路径模型路由',
+                  '快速路由与 Edwin 模型路由',
                   style: TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 14,
@@ -195,7 +212,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
                 ),
                 SizedBox(height: 3),
                 Text(
-                  '使用中的模型负责第一线分流：轻消息直答，重任务通过工具调用升级主脑。',
+                  '每个模型可独立指定为快速路由或 Edwin 主脑；Edwin 不支持 Codex CLI 模型。',
                   style: TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: 12,
@@ -243,13 +260,13 @@ class _ModelManagePageState extends State<ModelManagePage> {
     );
   }
 
-  Widget _buildTile(ModelEntry e, bool isCurrent) {
+  Widget _buildTile(ModelEntry e, bool isCurrent, bool isAgentCurrent) {
     return Panel(
       borderColor: isCurrent ? AppColors.accent : AppColors.border,
       borderWidth: isCurrent ? 1.6 : 1,
       child: InkWell(
         borderRadius: AppShape.borderRadius,
-        onTap: isCurrent ? null : () => _setCurrent(e.id),
+        onTap: null,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
           child: Row(
@@ -296,7 +313,11 @@ class _ModelManagePageState extends State<ModelManagePage> {
                         ),
                         if (isCurrent) ...[
                           const SizedBox(width: 8),
-                          _tag('使用中', AppColors.accent),
+                          _tag('快速路由', AppColors.accent),
+                        ],
+                        if (isAgentCurrent) ...[
+                          const SizedBox(width: 8),
+                          _tag('Edwin', AppColors.accentSoft),
                         ],
                       ],
                     ),
@@ -322,6 +343,34 @@ class _ModelManagePageState extends State<ModelManagePage> {
               // 操作
               Column(
                 children: [
+                  IconButton(
+                    tooltip: '设为快速路由模型',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      isCurrent ? Icons.bolt : Icons.bolt_outlined,
+                      size: 18,
+                    ),
+                    color: isCurrent
+                        ? AppColors.accent
+                        : AppColors.textSecondary,
+                    onPressed: isCurrent ? null : () => _setCurrent(e.id),
+                  ),
+                  IconButton(
+                    tooltip: '设为 Edwin Agent 模型',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      isAgentCurrent
+                          ? Icons.psychology
+                          : Icons.psychology_outlined,
+                      size: 18,
+                    ),
+                    color: isAgentCurrent
+                        ? AppColors.accentSoft
+                        : AppColors.textSecondary,
+                    onPressed: isAgentCurrent
+                        ? null
+                        : () => _setAgentCurrent(e),
+                  ),
                   IconButton(
                     tooltip: '编辑',
                     visualDensity: VisualDensity.compact,
@@ -439,7 +488,7 @@ class _EmptyState extends StatelessWidget {
 
 /// OpenAI-compatible provider presets.
 ///
-/// The fast path always validates through the OpenAI Chat Completions shape, so
+/// The FastRouter always validates through the OpenAI Chat Completions shape, so
 /// native non-compatible APIs are intentionally represented through compatible
 /// gateways such as OpenRouter instead of their native endpoints.
 class _ModelPreset {

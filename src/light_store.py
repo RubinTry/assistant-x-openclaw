@@ -4,7 +4,7 @@
 """
 轻消息意图路由。
 
-只有命中 light_patterns.json 的消息才允许进入快路径；其余默认走 agent。
+只有命中 light_patterns.json 的消息才允许进入快速路由；其余默认走 agent。
 配置文件支持按 intents 记录轻意图分组、按 agent_intents 记录强制升级分组，
 每个意图下支持 exact / contains / prefix / regex。
 同时兼容旧版顶层 exact / contains / prefix / regex，不在代码里固化具体话术。

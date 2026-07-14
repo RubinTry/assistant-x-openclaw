@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-人设加载：从当前角色的 SOUL 文件取一段精简人格，注入快路径。
+人设加载：从当前角色的 SOUL 文件取一段精简人格，注入快速路由。
 
-快路径是裸模型直连，默认丢角色人格；读角色权威的 SOUL 文件补上，让闲聊也像
+快速路由是裸模型直连，默认丢角色人格；读角色权威的 SOUL 文件补上，让闲聊也像
 jarvis / 林妹妹本人。同时适配两大引擎（SOUL 存放位置不同）：
 
   - hermes  : ~/.hermes/profiles/<agent>/SOUL.md   （HERMES_HOME 可覆盖）
   - openclaw: <agent.workspace>/SOUL.md            （读 openclaw.json 的 workspace，
               取不到时回退 ~/.openclaw/workspace/<agent>/SOUL.md）
 
-SOUL 可能很大（jarvis 24KB），整段塞进快路径会拖慢、费 token。这里只取**顶部**
+SOUL 可能很大（jarvis 24KB），整段塞进快速路由会拖慢、费 token。这里只取**顶部**
 ——角色圣经的开头恒为身份/语气精华——按字符预算在 `## ` 小节边界断开，不切半句。
 """
 
@@ -54,6 +54,13 @@ def _openclaw_soul_path(agent_id: str) -> str | None:
 
 def _soul_path(engine: str, agent_id: str) -> str | None:
     aid = _norm_agent(agent_id)
+    if (engine or "").strip().lower() == "edwin":
+        project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for name in (agent_id, aid, aid.replace("_", "-")):
+            p = os.path.join(project, "prompts", name, "SOUL.md")
+            if os.path.exists(p):
+                return p
+        return None
     if (engine or "").strip().lower() == "hermes":
         p = os.path.join(_hermes_home(), "profiles", aid, "SOUL.md")
         return p if os.path.exists(p) else None
@@ -77,7 +84,7 @@ def _compact(text: str, budget: int = _DEFAULT_BUDGET) -> str:
 
 
 def load_persona(engine: str, agent_id: str, budget: int = _DEFAULT_BUDGET) -> str:
-    """返回该引擎下该角色的精简人设；找不到 / 读失败返回空串（快路径退化为无人格）。"""
+    """返回该引擎下该角色的精简人设；找不到 / 读失败返回空串（快速路由退化为无人格）。"""
     path = _soul_path(engine, agent_id)
     if not path:
         return ""

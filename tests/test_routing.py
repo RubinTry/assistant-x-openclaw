@@ -25,12 +25,12 @@ class RoutingLiveDataTests(unittest.TestCase):
         else:
             sys.modules["light_store"] = self.previous_light_store
 
-    def test_wake_prefixed_live_sports_request_bypasses_fast_path(self):
+    def test_wake_prefixed_live_sports_request_bypasses_fast_router(self):
         text = "voice-assistant-wake-up-2026-07-14 11:07:17\n目前世界杯的情况怎么样"
         self.assertFalse(routing.is_obviously_light(text))
         self.assertEqual(routing.handoff_intent(text), "live_data")
 
-    def test_plain_greeting_can_still_use_fast_path(self):
+    def test_plain_greeting_can_still_use_fast_router(self):
         self.assertTrue(routing.is_obviously_light("你好 Jarvis"))
         self.assertEqual(routing.handoff_intent("你好 Jarvis"), "")
 

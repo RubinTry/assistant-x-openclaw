@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-快路径：直连 Control Center 配置的快模型，作为分流的第一线。
+快速路由：直连 Control Center 配置的快模型，作为分流的第一线。
 
 思路（与主 agent 桥 drop-in 同接口）：
   - 轻消息：快模型直接流式出文本 → 复用现成的句级 TTS 流水线，首字最快。
@@ -42,7 +42,7 @@ except Exception:  # pragma: no cover - openai 通常自带 httpx，缺失时用
 # 连接/读取超时。连接要短（快失败即回退 agent）；读取给足以防长答案被误截。
 _CONNECT_TIMEOUT = 6.0
 _READ_TIMEOUT = 60.0
-_HISTORY_TURNS = 3  # 快路径注入的近期对话轮数（含 fast + agent 轮，供短追问续接）
+_HISTORY_TURNS = 3  # 快速路由注入的近期对话轮数（含 FastRouter + agent 轮，供短追问续接）
 _HISTORY_MSG_CHARS = 240
 _MEMORY_DIRECT_CHARS = 260
 
@@ -66,7 +66,7 @@ _CODEX_OUTPUT_SCHEMA = {
 
 
 class AgentHandoff(Exception):
-    """快路径决定/被迫把本轮交回 agent。
+    """快速路由决定/被迫把本轮交回 agent。
 
     reason: 'model'(模型主动 handoff) | 'unavailable' | 'empty' | 'error:...'
     task:   交给 agent 的任务文本（模型清洗过的，或原始用户文本兜底）。
@@ -92,16 +92,19 @@ def _is_codex_provider(provider: str) -> bool:
     return (provider or "").strip().lower() == "openai-codex"
 
 
-def _fast_persona_rules(agent_name: str, persona: str) -> str:
+def _router_persona_rules(agent_name: str, persona: str, agent_id: str = "") -> str:
     """Return a short English persona control block.
 
     Keep system prompts English for stronger tool-calling compatibility and lower
-    token cost. The full SOUL may be long or Chinese; fast path only needs stable
+    token cost. The full SOUL may be long or Chinese; FastRouter only needs stable
     voice constraints, not the whole role bible.
     """
     name = (agent_name or "").strip()
+    aid = (agent_id or "").strip().lower().replace("-", "_")
     hay = f"{name}\n{persona or ''}".lower()
-    if "lin" in hay or "林" in hay:
+    # assistant_id is the authoritative isolation key. Display names and SOUL
+    # text are mutable inputs and must never override it during a switch race.
+    if aid == "lin_meimei" or (not aid and ("lin" in hay or "林" in hay)):
         return (
             "你是林妹妹，古风撒娇风格的 AI 助手。\n"
             "称呼用户为「哥哥」，自称「妹妹」，绝不自称「梅梅」或其他名字。\n"
@@ -112,7 +115,7 @@ def _fast_persona_rules(agent_name: str, persona: str) -> str:
             "判断标准：「完成这件事，除了说话还需要做什么别的吗？」——需要或不确定，就 handoff。"
             "不要猜答、不要编造、不要只说「好的妹妹去办」却不 handoff。"
         )
-    if "jarvis" in hay or "贾维斯" in hay:
+    if aid == "jarvis" or (not aid and ("jarvis" in hay or "贾维斯" in hay)):
         return (
             "You are Jarvis. Always reply in English, even when the user speaks "
             "or writes in another language. Address the user as \"sir\" when "
@@ -130,11 +133,11 @@ def _fast_persona_rules(agent_name: str, persona: str) -> str:
     )
 
 
-def _routing_system_prompt(agent_name: str, persona: str) -> str:
-    who = f"# Character\n{_fast_persona_rules(agent_name, persona)}\n\n"
+def _routing_system_prompt(agent_name: str, persona: str, agent_id: str = "") -> str:
+    who = f"# Character\n{_router_persona_rules(agent_name, persona, agent_id)}\n\n"
     return (
         f"{who}"
-        "You are the fast first-line responder for a voice assistant.\n"
+        "You are the FastRouter first-line responder for a voice assistant.\n"
         "Your default action is to call handoff_to_agent. Only answer directly if the "
         "message is PURELY one of these: greetings, chit-chat, opinions, general "
         "knowledge from training, language help, or simple math — and fulfilling it "
@@ -155,12 +158,13 @@ def _routing_system_prompt(agent_name: str, persona: str) -> str:
     )
 
 
-class FastPathClient:
+class FastRouterClient:
     def __init__(self, should_stop=None, agent_name: str = "", persona: str = "",
-                 history_reader=None, agent_id: str = ""):
+                 history_reader=None, agent_id: str = "", engine: str = ""):
         self._should_stop = should_stop or (lambda: False)
         self.agent_id = (agent_id or agent_name or "main").strip().replace("-", "_")
         self.agent_name = agent_name
+        self.engine = (engine or "").strip().lower()
         self.persona = persona
         # 引擎 session/memory 读取器（IHistoryReader）：让轻消息也拿到 agent lane 的
         # 近期对话、长期记忆与用户画像。为空则退化为无引擎上下文。
@@ -170,7 +174,7 @@ class FastPathClient:
 
     # ── 生命周期辅助 ────────────────────────────────────────────────
     def is_available(self) -> bool:
-        """有配置好的 current 快模型才启用快路径。"""
+        """有配置好的 current 快模型才启用快速路由。"""
         cfg = model_store.get_current_decrypted()
         if cfg is None:
             return False
@@ -186,12 +190,12 @@ class FastPathClient:
         self.history_reader = reader
 
     def reset(self) -> None:
-        """清空快路径滚动上下文（角色切换 / 退下时调用）。"""
+        """清空快速路由滚动上下文（角色切换 / 退下时调用）。"""
         self._history.clear()
 
     def _build_system_prompt(self, text: str) -> str:
         """English routing prompt + optional memory context."""
-        parts = [_routing_system_prompt(self.agent_name, self.persona)]
+        parts = [_routing_system_prompt(self.agent_name, self.persona, self.agent_id)]
 
         hr = self.history_reader
         if hr is not None and _needs_memory_context(text):
@@ -219,8 +223,8 @@ class FastPathClient:
         """Immediate continuity from the shared clean voice log.
 
         We avoid raw engine DB replay here. The shared store contains only
-        user/assistant voice turns from fast and agent lanes, so it is safe to
-        inject on every fast-path turn.
+        user/assistant voice turns from FastRouter and agent lanes, so it is safe to
+        inject on every FastRouter turn.
 
         近期对话**一律注入**（不再靠触发词门控）：像"讲英文""说中文""换个说法"
         这类天然追问却不含"继续/然后呢"等词的短句，此前拿不到任何上下文 → 裸模型
@@ -228,7 +232,12 @@ class FastPathClient:
         换来连续性，值得。长期记忆检索仍走 _needs_memory_context 门控（更贵）。
         """
         msgs = []
-        shared = voice_context_store.recent_turns(self.agent_id, limit=_HISTORY_TURNS * 2)
+        lanes = {"fast_router", "fast"}
+        if self.engine:
+            lanes.add(self.engine)
+        shared = voice_context_store.recent_turns(
+            self.agent_id, limit=_HISTORY_TURNS * 2, lanes=lanes,
+        )
         source = shared or list(self._history)
         for m in source:
             content = (m.get("content") or "")[:_HISTORY_MSG_CHARS]
@@ -299,8 +308,8 @@ class FastPathClient:
             raise AgentHandoff(text, text, reason="unavailable")
 
         prompt = self._build_codex_prompt(text)
-        schema_fd, schema_path = tempfile.mkstemp(prefix="codex_fast_schema_", suffix=".json")
-        out_fd, out_path = tempfile.mkstemp(prefix="codex_fast_out_", suffix=".txt")
+        schema_fd, schema_path = tempfile.mkstemp(prefix="codex_router_schema_", suffix=".json")
+        out_fd, out_path = tempfile.mkstemp(prefix="codex_router_out_", suffix=".txt")
         os.close(schema_fd)
         os.close(out_fd)
         try:
@@ -369,7 +378,7 @@ class FastPathClient:
                 f"{m['role']}: {m['content']}" for m in history
             )
         history_block = (
-            f"# Recent fast-path conversation\n{history_text}\n\n"
+            f"# Recent FastRouter conversation\n{history_text}\n\n"
             if history_text else ""
         )
         return (
@@ -491,7 +500,12 @@ class FastPathClient:
 
     def _recent_voice_turns(self, limit: int = 12) -> list[dict]:
         try:
-            shared = voice_context_store.recent_turns(self.agent_id, limit=limit)
+            lanes = {"fast_router", "fast"}
+            if self.engine:
+                lanes.add(self.engine)
+            shared = voice_context_store.recent_turns(
+                self.agent_id, limit=limit, lanes=lanes,
+            )
             if shared:
                 return self._clean_turns(shared, limit)
         except Exception:
@@ -570,5 +584,5 @@ class FastPathClient:
             return
         self._history.append({"role": "user", "content": user_text})
         self._history.append({"role": "assistant", "content": assistant_text})
-        voice_context_store.append_turn(self.agent_id, "fast", "user", user_text)
-        voice_context_store.append_turn(self.agent_id, "fast", "assistant", assistant_text)
+        voice_context_store.append_turn(self.agent_id, "fast_router", "user", user_text)
+        voice_context_store.append_turn(self.agent_id, "fast_router", "assistant", assistant_text)

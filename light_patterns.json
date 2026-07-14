@@ -1,7 +1,15 @@
 {
   "version": 3,
-  "description": "Fast-path intent routing. agent_intents are checked first and always go to the agent. intents are conservative light intents; anything uncertain misses and goes to the agent.",
+  "description": "FastRouter intent routing. agent_intents are checked first and always go to the agent. intents are conservative light intents; anything uncertain misses and goes to the agent.",
   "agent_intents": {
+    "runtime_identity": {
+      "description": "当前引擎、运行时或后端身份必须交给 Agent 查询权威运行状态，禁止 FastRouter 猜测",
+      "regex": [
+        ".*(当前|现在|正在用|使用).*(主脑|agent|引擎|运行时|后端).*(什么|哪个|哪一个|是啥|是谁).*",
+        ".*(what|which).*(agent|engine|runtime|backend).*(current|running|using|use).*",
+        ".*(current|running).*(agent|engine|runtime|backend).*"
+      ]
+    },
     "memory_write_or_persistent_preference": {
       "description": "要求记住、长期偏好、以后都这样等，需要写入或更新记忆",
       "regex": [

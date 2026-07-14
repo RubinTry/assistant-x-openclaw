@@ -118,7 +118,7 @@ class HermesBridge:
         # 软停止（soft_stop）：打断/退下时只停 TTS 回调，SSE 流继续消费到自然结束。
         #   浏览器等后台资源不会被清理（idle reaper 稍后回收）。
         # 硬取消（cancel_current_request）：断开 SSE 连接，触发 agent.interrupt()，
-        #   用于快路径识别到"中断任务"意图的场景。
+        #   用于快速路由识别到"中断任务"意图的场景。
         # 软停/硬取消必须按 request_id 记录。软停后的 SSE 会继续在后台消费；
         # 如果此时用户说“继续”并启动新请求，不能让旧请求因为 current_id 被覆盖
         # 就误判成硬取消，否则会触发 agent.interrupt() 并清理浏览器等资源。
@@ -218,7 +218,7 @@ class HermesBridge:
         return False
 
     def cancel_task(self) -> bool:
-        """硬取消：快路径识别到「中断任务」意图时调用。
+        """硬取消：快速路由识别到「中断任务」意图时调用。
 
         断开 SSE 连接，触发 agent.interrupt()，浏览器/终端等后台资源
         会被 agent 的 close() 路径清理。用于用户明确要求取消任务
@@ -230,7 +230,7 @@ class HermesBridge:
     def send_stop_command(self) -> bool:
         """打断：默认走软停止（断点续传），不断开 SSE 连接。
 
-        快路径识别到「中断任务」意图时，由 main.py 改调 cancel_task()。
+        快速路由识别到「中断任务」意图时，由 main.py 改调 cancel_task()。
         """
         return self.soft_stop()
 
@@ -251,7 +251,7 @@ class HermesBridge:
 
     def _build_messages(self, text):
         # 提示词由用户亲自下达给 session；桥只发用户消息，按 session-id 续历史。
-        # 额外注入快路径最近对话，补齐 fast lane 没写入 Hermes session 的上下文。
+        # 额外注入快速路由最近对话，补齐 router lane 没写入 Hermes session 的上下文。
         messages = []
         if self.agent_id == "jarvis":
             messages.append({"role": "system", "content": _JARVIS_ENGLISH_CONTRACT})
@@ -265,9 +265,9 @@ class HermesBridge:
                     "Do not quote or mention this system note."
                 ),
             })
-        fast_context = self._fast_context_message()
-        if fast_context:
-            messages.append({"role": "system", "content": fast_context})
+        router_context = self._fast_router_context_message()
+        if router_context:
+            messages.append({"role": "system", "content": router_context})
         if routing.needs_live_data(text):
             messages.append({
                 "role": "system",
@@ -289,8 +289,8 @@ class HermesBridge:
         messages.append({"role": "user", "content": text})
         return messages
 
-    def _fast_context_message(self) -> str:
-        turns = voice_context_store.recent_fast_context(self.agent_id, limit=8)
+    def _fast_router_context_message(self) -> str:
+        turns = voice_context_store.recent_fast_router_context(self.agent_id, limit=8)
         if not turns:
             return ""
         lines = []
@@ -303,7 +303,7 @@ class HermesBridge:
         if not lines:
             return ""
         return (
-            "Recent voice fast-path context. These turns happened in the same "
+            "Recent voice FastRouter context. These turns happened in the same "
             "voice assistant before this request, but may not exist in the "
             "Hermes session database. Use them only for continuity; do not quote "
             "or mention this system note.\n"
@@ -434,7 +434,7 @@ class HermesBridge:
             soft_stopped = False  # 本地快照，减少锁竞争
 
             for line in resp.iter_lines(decode_unicode=True):
-                # 硬取消：快路径「中断任务」意图 → 断开连接
+                # 硬取消：快速路由「中断任务」意图 → 断开连接
                 with self._lock:
                     if request_id in self._cancelled_requests:
                         logger.info("请求 %s 已被硬取消（中断任务意图）", request_id)

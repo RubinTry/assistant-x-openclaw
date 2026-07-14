@@ -137,7 +137,7 @@ else
 fi
 
 # ── 主脑引擎自愈：engine=hermes 时确保各角色 Hermes 网关在跑 ───────────
-ENGINE=$("$VENV_PYTHON" -c "import json;print((json.load(open('${PROJECT_DIR}/assistants.json')).get('engine') or 'openclaw').strip().lower())" 2>/dev/null || echo openclaw)
+ENGINE=$("$VENV_PYTHON" -c "import json;print((json.load(open('${PROJECT_DIR}/assistants.json')).get('engine') or 'edwin').strip().lower())" 2>/dev/null || echo edwin)
 HERMES_PIDS_FILE="${PROJECT_DIR}/.hermes_gateways.pids"
 if [ "$ENGINE" = "hermes" ]; then
     echo "[引擎] hermes：校验各角色网关…"
@@ -149,6 +149,14 @@ if [ "$ENGINE" = "hermes" ]; then
     fi
 else
     echo "[引擎] ${ENGINE}：跳过 Hermes 自愈"
+    if [ "$ENGINE" = "edwin" ]; then
+        if "$VENV_PYTHON" -c "import sys;sys.path.insert(0,'${PROJECT_DIR}/src');from edwin.memory import EdwinMemoryStore;EdwinMemoryStore()"; then
+            echo "[引擎] Edwin：数据库就绪（模型与工具将在主程序内预检）"
+        else
+            echo "[引擎] Edwin：数据库初始化失败"
+            exit 1
+        fi
+    fi
 fi
 
 cleanup() {

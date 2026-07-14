@@ -2,18 +2,18 @@
 # -*- coding: utf-8 -*-
 
 """
-IHistoryReader —— 从引擎读取 session（近期对话）与 memory（长期记忆），喂给快路径。
+IHistoryReader —— 从引擎读取 session（近期对话）与 memory（长期记忆），喂给快速路由。
 
 分流后轻消息由裸模型直答，默认丢了 agent 的 session 与 memory；本模块把两大引擎
-各自的**本地存储**抽象成统一接口，让快路径也能拿到近期对话与相关记忆：
+各自的**本地存储**抽象成统一接口，让快速路由也能拿到近期对话与相关记忆：
 
   - Hermes  : profiles/<agent>/state.db 的 messages 表 + memories/USER.md
   - OpenClaw: agents/<agent>/sessions/<id>.jsonl + memory/<agent>.sqlite (chunks)
 
 设计取舍（已与用户确认）：
   - 本地直读（~ms，够快上热路径），不走引擎 API（RPC 太慢）
-  - 一切 fail-open：读失败/schema 变化 → 返回空，快路径退化为无上下文，绝不报错
-  - 只读不写：快路径的回答暂不写回引擎 session（轻轮多为闲聊，影响小）
+  - 一切 fail-open：读失败/schema 变化 → 返回空，快速路由退化为无上下文，绝不报错
+  - 只读不写：快速路由的回答暂不写回引擎 session（轻轮多为闲聊，影响小）
   - 定位当前会话：Hermes 用 voice-<agent>-* 前缀取最新；OpenClaw 用 agent:<a>:<a> 键
 """
 
@@ -60,7 +60,7 @@ class IHistoryReader(ABC):
 
     @abstractmethod
     def is_available(self) -> bool:
-        """底层存储是否就绪（供快路径决定是否注入上下文）。"""
+        """底层存储是否就绪（供快速路由决定是否注入上下文）。"""
 
     @abstractmethod
     def recent_turns(self, limit: int = 6) -> list[dict]:
@@ -262,13 +262,46 @@ class OpenClawHistoryReader(IHistoryReader):
             return ""
 
 
+class EdwinHistoryReader(IHistoryReader):
+    def __init__(self, agent_id: str):
+        self.aid = _norm(agent_id)
+        from edwin.memory import EdwinMemoryStore
+        self.store = EdwinMemoryStore()
+
+    def is_available(self) -> bool:
+        return self.store.path.exists()
+
+    def recent_turns(self, limit: int = 6) -> list[dict]:
+        try:
+            rows = self.store.recent(self.aid, limit=limit)
+        except Exception:
+            rows = []
+        shared = voice_context_store.recent_turns(self.aid, limit=limit)
+        combined = rows + shared
+        out = []
+        for row in combined:
+            item = {"role": row.get("role"), "content": row.get("content") or ""}
+            if item["content"] and (not out or item != out[-1]): out.append(item)
+        return out[-limit:]
+
+    def search_memory(self, query: str, limit: int = 5) -> list[str]:
+        try: return self.store.search(self.aid, query, limit=limit)
+        except Exception: return []
+
+    def user_profile(self, limit_chars: int = 600) -> str:
+        memories = self.search_memory("preference remember user profile 偏好 记住", limit=8)
+        return "\n".join(memories)[:limit_chars]
+
+
 # ── 工厂 ─────────────────────────────────────────────────────────────
 
 def get_history_reader(engine: str, agent_id: str) -> IHistoryReader | None:
-    """按引擎返回对应 reader；未知引擎返回 None（快路径退化为无上下文）。"""
+    """按引擎返回对应 reader；未知引擎返回 None（快速路由退化为无上下文）。"""
     eng = (engine or "").strip().lower()
     if eng == "hermes":
         return HermesHistoryReader(agent_id)
     if eng == "openclaw":
         return OpenClawHistoryReader(agent_id)
+    if eng == "edwin":
+        return EdwinHistoryReader(agent_id)
     return None

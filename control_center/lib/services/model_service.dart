@@ -98,6 +98,9 @@ class ModelService {
 
   Future<void> setCurrent(String id) => _run('current', payload: {'id': id});
 
+  Future<void> setAgentCurrent(String id) =>
+      _run('agent-current', payload: {'id': id});
+
   Future<void> delete(String id) => _run('delete', payload: {'id': id});
 
   /// 能力探针：新条目传明文，或已存条目传 id（后端解密）。
@@ -134,11 +137,13 @@ class ModelServiceException implements Exception {
 
 class ModelTable {
   final String? current;
+  final String? agentCurrent;
   final List<ModelEntry> models;
-  ModelTable({this.current, required this.models});
+  ModelTable({this.current, this.agentCurrent, required this.models});
 
   factory ModelTable.fromJson(Map<String, dynamic> j) => ModelTable(
     current: j['current'] as String?,
+    agentCurrent: j['agent_current'] as String?,
     models: ((j['models'] as List?) ?? [])
         .map((e) => ModelEntry.fromJson((e as Map).cast<String, dynamic>()))
         .toList(),

@@ -1,8 +1,8 @@
 {
-    "engine_comment": "主脑引擎，可选值：openclaw（默认）、hermes",
-    "engine": "hermes",
-    "fastMode_comment": "是否启用快路径模式：true 时轻量对话先走 Control Center 配置的快模型，重任务再升级到 agent；可降低响应延迟，但因路由/人设/记忆注入会额外消耗 token，通常约为普通 agent-only 模式的 1.2~1.7 倍。",
-    "fastMode": false,
+    "engine_comment": "主脑引擎，可选值：edwin（默认，项目内置）、openclaw、hermes",
+    "engine": "edwin",
+    "fastRouterMode_comment": "是否启用快速路由模式：true 时轻量对话先走 Control Center 配置的快模型，重任务再升级到 agent；可降低响应延迟，但因路由/人设/记忆注入会额外消耗 token，通常约为普通 agent-only 模式的 1.2~1.7 倍。",
+    "fastRouterMode": true,
     "default": "jarvis",
     "overlay_debug_mode": false,
     "dock_autohide_on_wake_comment": "true 时助手激活期自动隐藏系统 Dock，退回待机还原（仅 macOS）",

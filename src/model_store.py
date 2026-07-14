@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-模型表存储（快路径直连模型的配置源）。
+模型表存储（快速路由直连模型的配置源）。
 
 设计要点：
   - 单一 JSON 文件存在项目根目录 model_table.json，只经本模块读写，
@@ -111,7 +111,7 @@ def _now() -> str:
 
 
 def _empty_table() -> dict:
-    return {"version": _TABLE_VERSION, "current": None, "models": []}
+    return {"version": _TABLE_VERSION, "current": None, "agent_current": None, "models": []}
 
 
 def _load() -> dict:
@@ -127,8 +127,14 @@ def _load() -> dict:
         return _empty_table()
     data.setdefault("version", _TABLE_VERSION)
     data.setdefault("current", None)
+    data.setdefault("agent_current", None)
     if not isinstance(data.get("models"), list):
         data["models"] = []
+    if not data.get("agent_current"):
+        compatible = [e for e in data["models"] if not is_codex_provider(e.get("provider", ""))]
+        if compatible:
+            current = next((e for e in compatible if e.get("id") == data.get("current")), None)
+            data["agent_current"] = (current or compatible[0]).get("id")
     return data
 
 
@@ -170,6 +176,7 @@ def list_models() -> dict:
         return {
             "version": data.get("version", _TABLE_VERSION),
             "current": data.get("current"),
+            "agent_current": data.get("agent_current"),
             "models": [_public_entry(e) for e in data.get("models", [])],
         }
 
@@ -245,6 +252,8 @@ def upsert_model(entry: dict) -> dict:
         # 首条自动设为 current
         if not data.get("current"):
             data["current"] = entry_id
+        if not data.get("agent_current") and not codex_provider:
+            data["agent_current"] = entry_id
         _save(data)
         return _public_entry(record)
 
@@ -259,6 +268,9 @@ def delete_model(entry_id: str) -> dict:
         # 删掉的正好是 current → 回退到第一条（或 None）
         if data.get("current") == entry_id:
             data["current"] = data["models"][0]["id"] if data["models"] else None
+        if data.get("agent_current") == entry_id:
+            candidates = [e for e in data["models"] if not is_codex_provider(e.get("provider", ""))]
+            data["agent_current"] = candidates[0]["id"] if candidates else None
         _save(data)
         return list_models()
 
@@ -269,6 +281,19 @@ def set_current(entry_id: str) -> dict:
         if not any(e.get("id") == entry_id for e in data["models"]):
             raise KeyError(f"模型 {entry_id} 不存在")
         data["current"] = entry_id
+        _save(data)
+        return list_models()
+
+
+def set_agent_current(entry_id: str) -> dict:
+    with _lock:
+        data = _load()
+        entry = next((e for e in data["models"] if e.get("id") == entry_id), None)
+        if entry is None:
+            raise KeyError(f"模型 {entry_id} 不存在")
+        if is_codex_provider(entry.get("provider", "")):
+            raise ValueError("OpenAI Codex CLI 不能作为 Edwin Agent 模型")
+        data["agent_current"] = entry_id
         _save(data)
         return list_models()
 
@@ -302,6 +327,14 @@ def get_current_decrypted() -> dict | None:
             "model": entry.get("model"),
             "api_key": api_key,
         }
+
+
+def get_agent_decrypted() -> dict | None:
+    """Return the model selected for Edwin, decrypted in-process only."""
+    with _lock:
+        data = _load()
+        entry_id = data.get("agent_current")
+    return get_decrypted(entry_id) if entry_id else None
 
 
 def get_decrypted(entry_id: str) -> dict | None:

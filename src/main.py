@@ -62,7 +62,7 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 "error": "heavy_patterns deprecated",
-                "message": "Fast path now uses light_patterns.json as an allowlist.",
+                "message": "FastRouter now uses light_patterns.json as an allowlist.",
             }).encode())
         elif self.path == "/dnd":
             _dnd_mode = True
@@ -88,7 +88,7 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "error": "heavy_patterns deprecated",
                 "patterns": [],
-                "message": "Fast path now uses light_patterns.json as an allowlist.",
+                "message": "FastRouter now uses light_patterns.json as an allowlist.",
             }).encode())
             return
 
@@ -251,14 +251,14 @@ def _env_bool(name: str, default: bool) -> bool:
 _load_dotenv()
 
 
-# ── 主脑引擎选择（assistants.json 顶层 engine 字段，默认 openclaw）──────────
+# ── 主脑引擎选择（assistants.json 顶层 engine 字段，默认 edwin）──────────
 def _load_engine() -> str:
-    """读取 assistants.json 顶层 engine：openclaw（默认）| hermes。"""
+    """读取 assistants.json 顶层 engine：edwin（默认）| openclaw | hermes。"""
     try:
         with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
-            return (json.load(f).get("engine") or "openclaw").strip().lower()
+            return (json.load(f).get("engine") or "edwin").strip().lower()
     except Exception:
-        return "openclaw"
+        return "edwin"
 
 
 def _load_overlay_debug() -> bool:
@@ -270,11 +270,11 @@ def _load_overlay_debug() -> bool:
         return False
 
 
-def _load_fast_mode() -> bool:
-    """读取 assistants.json 顶层 fastMode：true 时启用快路径分流。"""
+def _load_fast_router_mode() -> bool:
+    """读取 assistants.json 顶层 fastRouterMode：true 时启用快速路由分流。"""
     try:
         with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
-            return bool(json.load(f).get("fastMode", False))
+            return bool(json.load(f).get("fastRouterMode", False))
     except Exception:
         return False
 
@@ -293,13 +293,15 @@ if _ENGINE == "hermes":
     from hermes_bridge import get_bridge  # noqa: E402
 
     print("[引擎] 主脑：Hermes（一角色一 profile 一网关）")
-else:
+elif _ENGINE == "openclaw":
     from openclaw_bridge_websocket import get_bridge  # noqa: E402
-
-    if _ENGINE != "openclaw":
-        print(f"[引擎] 未知 engine='{_ENGINE}'，回退 OpenClaw")
-    else:
-        print("[引擎] 主脑：OpenClaw")
+    print("[引擎] 主脑：OpenClaw")
+else:
+    from edwin_bridge import get_bridge  # noqa: E402
+    if _ENGINE != "edwin":
+        print(f"[引擎] 未知 engine='{_ENGINE}'，回退 Edwin")
+        _ENGINE = "edwin"
+    print("[引擎] 主脑：Edwin（内置）")
 
 # ── 声纹验证配置 ────────────────────────────────────────────
 _SPEAKER_MODEL_PATH = os.path.join(_PROJECT_DIR, "models", "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx")
@@ -673,6 +675,10 @@ class VoiceAssistant:
         self.default_cfg = default_cfg
         self.all_assistants = {a["id"]: a for a in all_assistants}
         self.keyword_mapping = keyword_mapping  # keyword_text -> assistant_id
+        # Wake detection can arrive from more than one recognition path. Role
+        # component switching and bridge/FastRouter construction are one atomic
+        # transaction; otherwise two wake paths can build a hybrid identity.
+        self._assistant_switch_lock = threading.RLock()
 
         # 初始化 assistant manager
         self.assistant_manager = get_manager()
@@ -1479,9 +1485,22 @@ class VoiceAssistant:
         print(f"[切换] 已切换到: {self.current_cfg['name']} ({assistant_id})")
         return True
 
+    def _switch_and_init_assistant(self, assistant_id: str) -> bool:
+        """Atomically switch role components and rebuild all role-bound lanes."""
+        with self._assistant_switch_lock:
+            if self.current_cfg.get("id") == assistant_id:
+                return True
+            if not self._switch_assistant(assistant_id):
+                return False
+            self._init_openclaw()
+            return True
+
     def _init_openclaw(self):
         """初始化 OpenClaw bridge"""
-        assistant_id = self.current_cfg["id"]
+        # Snapshot the entire role configuration. Reading self.current_cfg again
+        # later can combine a previous id with a newly switched display name.
+        role_cfg = dict(self.current_cfg)
+        assistant_id = role_cfg["id"]
         # 按当前助手异步加载打断词 spotter（启动与切换都经过这里）
         self._load_interrupt_spotter_async(assistant_id)
         if self.openclaw:
@@ -1497,28 +1516,29 @@ class VoiceAssistant:
         self.openclaw = get_bridge(agent_id=agent_id, namespace=agent_id)
         self.openclaw.precheck_async()
 
-        # 快路径（分流第一线）：直连 Control Center 配置的快模型。
-        # fastMode=false 或未配置模型表时，_route_stream 自动全走 agent。
-        if not _load_fast_mode():
-            self._fast_path = None
-            print("[分流] fastMode=false，快路径已关闭（全走 agent）")
+        # 快速路由（分流第一线）：直连 Control Center 配置的快模型。
+        # fastRouterMode=false 或未配置模型表时，_route_stream 自动全走 agent。
+        if not _load_fast_router_mode():
+            self._fast_router = None
+            print("[分流] fastRouterMode=false，快速路由已关闭（全走 agent）")
             return
 
         try:
-            from fast_path import FastPathClient
+            from fast_router import FastRouterClient
             engine = _load_engine()
-            self._fast_path = FastPathClient(
+            self._fast_router = FastRouterClient(
                 should_stop=self._stop_openclaw_request.is_set,
-                agent_name=self.current_cfg.get("name") or assistant_id,
+                agent_name=role_cfg.get("name") or assistant_id,
                 agent_id=assistant_id,
+                engine=engine,
             )
-            # 人设跟随当前引擎 + 当前角色：从 SOUL 文件取精简人格注入快路径，
+            # 人设跟随当前引擎 + 当前角色：从 SOUL 文件取精简人格注入快速路由，
             # 让闲聊也像 jarvis / 林妹妹本人（openclaw 与 hermes 各自 SOUL 位置不同）。
             try:
                 from persona_loader import load_persona
                 persona = load_persona(engine, assistant_id)
                 if persona:
-                    self._fast_path.set_persona(persona)
+                    self._fast_router.set_persona(persona)
                     print(f"[分流] 已注入 {assistant_id} 人设（{len(persona)} 字，引擎 {engine}）")
             except Exception as e:  # noqa: BLE001 — 人设可选，失败退化为无人格
                 print(f"[分流] 人设加载失败（忽略）: {e}")
@@ -1528,17 +1548,17 @@ class VoiceAssistant:
                 from history_reader import get_history_reader
                 reader = get_history_reader(engine, assistant_id)
                 if reader is not None:
-                    self._fast_path.set_history_reader(reader)
+                    self._fast_router.set_history_reader(reader)
                     print(f"[分流] 已挂载 {engine} 历史读取器（available={reader.is_available()}）")
             except Exception as e:  # noqa: BLE001 — 历史读取可选，失败退化为无引擎上下文
                 print(f"[分流] 历史读取器挂载失败（忽略）: {e}")
-        except Exception as e:  # noqa: BLE001 — 快路径不可用绝不能拖垮桥初始化
-            print(f"[分流] 快路径初始化失败（忽略，全走 agent）: {e}")
-            self._fast_path = None
+        except Exception as e:  # noqa: BLE001 — 快速路由不可用绝不能拖垮桥初始化
+            print(f"[分流] 快速路由初始化失败（忽略，全走 agent）: {e}")
+            self._fast_router = None
 
     @staticmethod
     def _agent_label():
-        return "Hermes" if _ENGINE == "hermes" else "OpenClaw"
+        return {"hermes": "Hermes", "openclaw": "OpenClaw", "edwin": "Edwin"}.get(_ENGINE, "Edwin")
 
     def _detect_assistant_from_keyword(self, keyword_result: str) -> str:
         """从唤醒词检测结果识别是哪个 assistant"""
@@ -2597,8 +2617,7 @@ class VoiceAssistant:
                                 early_wake_result
                             )
                             if detected_assistant_id != self.current_cfg["id"]:
-                                self._switch_assistant(detected_assistant_id)
-                                self._init_openclaw()
+                                self._switch_and_init_assistant(detected_assistant_id)
 
                             self.is_awake = True
                             self.continuous_mode = True
@@ -2719,8 +2738,7 @@ class VoiceAssistant:
                                 self._speaker_verified = True
 
                             if detected_assistant_id != self.current_cfg["id"]:
-                                self._switch_assistant(detected_assistant_id)
-                                self._init_openclaw()
+                                self._switch_and_init_assistant(detected_assistant_id)
 
                             self.is_awake = True
                             self.continuous_mode = True
@@ -2830,8 +2848,7 @@ class VoiceAssistant:
                                 print(
                                     f"[切换] 检测到 {self.keyword_mapping.get(result, detected_assistant_id)} 的唤醒词，正在切换..."
                                 )
-                                self._switch_assistant(detected_assistant_id)
-                                self._init_openclaw()
+                                self._switch_and_init_assistant(detected_assistant_id)
 
                             self._ignore_next_result = True
                             self._suppress_recognition_until_tts_done = True
@@ -3203,7 +3220,7 @@ class VoiceAssistant:
 
         打断时只停 TTS 播报和流式回调，SSE 连接保持不断开。
         浏览器等后台资源继续运行，由 idle reaper 在超时后自动回收。
-        快路径识别到「中断任务」意图时，改调 _cancel_task()。
+        快速路由识别到「中断任务」意图时，改调 _cancel_task()。
         """
         print("\n[打断] 检测到唤醒词，执行软停止（断点续传）...")
         # 软停止：标记请求已停止，TTS 静默，但不断开 SSE 连接
@@ -3223,12 +3240,12 @@ class VoiceAssistant:
         print("[打断] 软停止完成，后台任务继续运行")
 
     def _cancel_task(self):
-        """硬取消任务：快路径识别到「中断任务」意图时调用。
+        """硬取消任务：快速路由识别到「中断任务」意图时调用。
 
         断开 SSE 连接，触发 agent.interrupt()，浏览器等后台资源
         会被清理。用于用户明确要求取消任务。
         """
-        print("\n[取消任务] 快路径识别到中断任务意图，执行硬取消...")
+        print("\n[取消任务] 快速路由识别到中断任务意图，执行硬取消...")
         self.openclaw.cancel_task()
         self._stop_openclaw_request.set()
         self._is_openclaw_busy = False
@@ -3269,21 +3286,21 @@ class VoiceAssistant:
         """分流：轻消息白名单进快模型，其余默认走 agent。
 
         与桥 send_and_wait_stream 同签名/同回调契约——TTS 流水线、等待音、结果处理
-        全部复用，两条路对上层完全透明。未配置快模型 / 非轻消息 / 快路径失败，
+        全部复用，两条路对上层完全透明。未配置快模型 / 非轻消息 / 快速路由失败，
         一律走 agent 兜底（fail-open）。
         """
         import routing
-        fp = getattr(self, "_fast_path", None)
-        use_fast = (
-            fp is not None
-            and fp.is_available()
+        router = getattr(self, "_fast_router", None)
+        use_router = (
+            router is not None
+            and router.is_available()
             and not force_agent_reason
             and routing.is_obviously_light(text)
         )
-        if use_fast:
+        if use_router:
             try:
-                from fast_path import AgentHandoff
-                return fp.send_and_wait_stream(
+                from fast_router import AgentHandoff
+                return router.send_and_wait_stream(
                     text, on_chunk=on_chunk, on_start=on_start, on_end=on_end,
                 )
             except AgentHandoff as h:
@@ -3293,7 +3310,7 @@ class VoiceAssistant:
             if force_agent_reason:
                 reason = f"原文强制 agent: {force_agent_reason}"
             else:
-                reason = "无快模型" if (fp is None or not fp.is_available()) else "非轻消息"
+                reason = "无快模型" if (router is None or not router.is_available()) else "非轻消息"
             print(f"[分流] 直连 agent（{reason}）")
 
         # 重路径：agent 桥（openclaw / hermes），保持原有行为不变
@@ -3726,6 +3743,9 @@ class VoiceAssistant:
         print("\n[收到退下信号]")
         # 退下即取消未答完的"是否继续"待决策，避免下次唤醒串状态。
         self._pending_resume_decision = False
+        clear_approval = getattr(self.openclaw, "clear_pending_approval", None)
+        if callable(clear_approval):
+            clear_approval()
         # 使用静默中断，避免重复发送 /stop 命令
         self._interrupt_openclaw_silent()
         # self._clear_openclaw_context()
@@ -3738,10 +3758,10 @@ class VoiceAssistant:
         self.continuous_mode = False
         self._verified_speaker_name = None
         self._conv_audio_buffer.clear()
-        # 退下时清空快路径滚动上下文，避免下次唤醒串上一次的追问语境
-        _fp = getattr(self, "_fast_path", None)
-        if _fp is not None:
-            _fp.reset()
+        # 退下时清空快速路由滚动上下文，避免下次唤醒串上一次的追问语境
+        _router = getattr(self, "_fast_router", None)
+        if _router is not None:
+            _router.reset()
         play_prebuilt_voice("exit", _random_exit_line())
         while is_tts_playing():
             time.sleep(0.05)

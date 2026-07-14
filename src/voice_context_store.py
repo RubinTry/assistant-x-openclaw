@@ -4,7 +4,7 @@
 """
 Shared voice context store.
 
-Fast-path replies and engine replies live in different systems. This module
+FastRouter replies and engine replies live in different systems. This module
 keeps a small, project-owned JSONL log so both lanes can see the same recent
 voice conversation without writing into Hermes/OpenClaw internal databases.
 """
@@ -84,6 +84,7 @@ def recent_turns(
         rows = [r for r in rows if r.get("lane") in lanes]
     if since_ts is not None:
         rows = [r for r in rows if float(r.get("ts") or 0) >= since_ts]
+    normalized_agent = _norm(agent_id)
     rows = [
         {
             "role": r.get("role"),
@@ -93,12 +94,27 @@ def recent_turns(
         }
         for r in rows
         if r.get("role") in ("user", "assistant") and r.get("content")
+        and not _obvious_cross_persona_leak(normalized_agent, r.get("role"), r.get("content") or "")
     ]
     return rows[-limit:]
 
 
-def recent_fast_context(agent_id: str, *, limit: int = 8) -> list[dict]:
-    return recent_turns(agent_id, limit=limit, lanes={"fast"})
+def _obvious_cross_persona_leak(agent_id: str, role: str, content: str) -> bool:
+    """Quarantine known impossible assistant identities without deleting audit data."""
+    if role != "assistant":
+        return False
+    low = content.lower()
+    if agent_id == "jarvis":
+        return "哥哥" in content or "妹妹在" in content or "自称妹妹" in content
+    if agent_id == "lin_meimei":
+        return "i am jarvis" in low or "at your service, sir" in low
+    return False
+
+
+def recent_fast_router_context(agent_id: str, *, limit: int = 8) -> list[dict]:
+    # Read legacy "fast" rows so existing conversations remain continuous;
+    # every new row is written with the FastRouter lane name.
+    return recent_turns(agent_id, limit=limit, lanes={"fast_router", "fast"})
 
 
 def _read_tail(agent_id: str, max_lines: int = 200) -> list[dict]:

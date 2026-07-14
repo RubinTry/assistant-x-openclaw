@@ -11,7 +11,7 @@
 探针只用一次最小请求，测的是"能力"而非"意愿"——挂一个 handoff 工具 + 强制
 tool_choice，看端点/模型能否吐出合规的 tool_calls。判读逻辑（interpret_probe）
 是纯函数，可离线单测；网络部分（probe_model）用 OpenAI Python SDK，与运行期
-快路径保持同一套 OpenAI-compatible 语义。
+快速路由保持同一套 OpenAI-compatible 语义。
 """
 
 import json
@@ -28,8 +28,8 @@ try:
 except Exception:  # pragma: no cover
     _httpx = None
 
-# 校验用的 handoff 工具 schema。与后续快路径真正下发给模型的应保持一致
-# （单一事实源：真正接快路径时从这里 import）。
+# 校验用的 handoff 工具 schema。与后续快速路由真正下发给模型的应保持一致
+# （单一事实源：真正接快速路由时从这里 import）。
 HANDOFF_TOOL = {
     "type": "function",
     "function": {
