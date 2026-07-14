@@ -1997,6 +1997,17 @@ class VoiceAssistant:
         standby_recognition_result = ""
         standby_last_result_time = time.time()
         standby_audio_buffer = []
+        # 仅保存 VAD 判定的当前说话段，供 KWS 提前命中时做声纹/活体验证。
+        # 旧的 _wake_audio_buffer 是固定 3 秒滚动窗，会混入唤醒前的静音和环境声。
+        wake_vad_audio_buffer = []
+        wake_vad_active = False
+
+        def _wake_verification_samples():
+            if wake_vad_audio_buffer:
+                return [sample for buf in wake_vad_audio_buffer for sample in buf]
+            # VAD 不可用时保留旧路径作为降级，但只取最近 2 秒，减少无关前导。
+            fallback = [sample for buf in self._wake_audio_buffer for sample in buf]
+            return fallback[-int(self._asr_rate * 2.0):]
 
         def start_audio_stream():
             nonlocal audio_stream
@@ -2116,6 +2127,8 @@ class VoiceAssistant:
                     self._wake_audio_buffer.clear()
                     self._vad_buffer.clear()
                     self._conv_audio_buffer.clear()
+                    wake_vad_audio_buffer = []
+                    wake_vad_active = False
                     self.last_activity_time = time.time()
                     print("[音频设备] 音频流已切换到当前默认输入设备")
                     continue
@@ -2259,6 +2272,24 @@ class VoiceAssistant:
                         if vad_stream.is_speech_detected():
                             vad_has_speech = True
 
+                    if vad_stream is not None:
+                        if vad_has_speech:
+                            if not wake_vad_active:
+                                # VAD 有少量起音延迟，补回约 250ms，避免截掉首个音节。
+                                pre_roll = [
+                                    sample
+                                    for buf in self._wake_audio_buffer
+                                    for sample in buf
+                                ][-int(self._asr_rate * 0.25):]
+                                wake_vad_audio_buffer = [pre_roll] if pre_roll else []
+                                wake_vad_active = True
+                            else:
+                                wake_vad_audio_buffer.append(asr_samples.tolist())
+                        elif wake_vad_active:
+                            # 一段话结束后才清空；KWS 通常会在 VAD 仍为 active 时命中。
+                            wake_vad_audio_buffer = []
+                            wake_vad_active = False
+
                     # DND 解除瞬间：重建 KWS 流，清掉跨越勿扰边界残留的半个唤醒词，
                     # 避免声纹录入刚结束就被尾音误唤醒（边沿触发，仅在 True→False 时执行一次）
                     if self._prev_dnd_mode and not _dnd_mode:
@@ -2325,11 +2356,7 @@ class VoiceAssistant:
                                 continue
 
                             print(f"\n[实验] KWS 提前命中: {early_wake_result}")
-                            wake_samples = [
-                                sample
-                                for buf in self._wake_audio_buffer
-                                for sample in buf
-                            ]
+                            wake_samples = _wake_verification_samples()
                             if self._speaker_enabled:
                                 print(
                                     "[声纹] 唤醒词阶段立即进行声纹+活体验证 "
@@ -2346,6 +2373,8 @@ class VoiceAssistant:
                                     standby_recognition_result = ""
                                     standby_last_result_time = time.time()
                                     standby_audio_buffer = []
+                                    wake_vad_audio_buffer = []
+                                    wake_vad_active = False
                                     continue
                                 self._speaker_verified = True
 
@@ -2493,12 +2522,7 @@ class VoiceAssistant:
 
                             # ── 声纹验证 ──────────────────────────────────────
                             if self._speaker_enabled:
-                                # 从缓冲区取出最近 3 秒音频用于验证
-                                wake_samples = []
-                                for buf in self._wake_audio_buffer:
-                                    wake_samples.extend(buf)
-                                if len(wake_samples) > self._wake_buffer_max_samples:
-                                    wake_samples = wake_samples[-self._wake_buffer_max_samples:]
+                                wake_samples = _wake_verification_samples()
                                 print(f"[声纹] 唤醒词检测成功，准备验证声纹 (样本长度: {len(wake_samples)})")
                                 is_verified = self._verify_speaker_on_wake(wake_samples, self._asr_rate)
                                 if not is_verified:
