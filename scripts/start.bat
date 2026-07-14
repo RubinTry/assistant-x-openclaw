@@ -40,6 +40,7 @@ echo.
 echo Cleaning up existing processes...
 taskkill /F /IM python.exe 2>nul
 taskkill /F /IM pythonw.exe 2>nul
+taskkill /F /IM windows_system_audio_capture.exe 2>nul
 taskkill /F /IM assistant_overlay.exe 2>nul
 ping -n 2 127.0.0.1 >nul
 

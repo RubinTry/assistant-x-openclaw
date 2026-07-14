@@ -1,5 +1,6 @@
 import CoreMedia
 import AudioToolbox
+import Darwin
 import Foundation
 import ScreenCaptureKit
 
@@ -53,6 +54,18 @@ private final class SystemAudioOutput: NSObject, SCStreamOutput {
 @main
 private struct MacOSSystemAudioCapture {
     static func main() async {
+        let parentPID = getppid()
+        // ScreenCaptureKit initialization itself can block for several seconds.
+        // Monitor the parent independently so a killed launcher cannot strand us
+        // before startCapture() has returned.
+        Task.detached {
+            while true {
+                try? await Task.sleep(for: .seconds(1))
+                if getppid() != parentPID {
+                    exit(0)
+                }
+            }
+        }
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false,

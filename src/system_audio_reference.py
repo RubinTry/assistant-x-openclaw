@@ -159,6 +159,19 @@ class SubprocessSystemAudioReferenceProvider(SystemAudioReferenceProvider):
         process = self._process
         if process is not None and process.poll() is None:
             process.terminate()
+            try:
+                process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    self._emit_status("helper did not exit after kill")
+        if process is not None:
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
 
 
 def default_system_audio_helper_path(project_root: str | os.PathLike[str]) -> Path:

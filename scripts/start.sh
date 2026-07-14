@@ -77,8 +77,25 @@ fi
 echo "清理已有的语音助手进程..."
 PIDS=$(pgrep -f "${PROJECT_DIR}/src/main.py" 2>/dev/null)
 if [ -n "$PIDS" ]; then
-    echo "  杀死旧的语音助手进程: $PIDS"
-    kill -9 $PIDS 2>/dev/null
+    echo "  停止旧的语音助手进程: $PIDS"
+    kill $PIDS 2>/dev/null
+    for _ in 1 2 3 4 5; do
+        REMAINING_PIDS=$(pgrep -f "${PROJECT_DIR}/src/main.py" 2>/dev/null)
+        [ -z "$REMAINING_PIDS" ] && break
+        sleep 1
+    done
+    if [ -n "$REMAINING_PIDS" ]; then
+        echo "  旧进程未及时退出，强制结束: $REMAINING_PIDS"
+        kill -9 $REMAINING_PIDS 2>/dev/null
+    fi
+fi
+
+# 旧助手由 SIGKILL 结束时无法执行 AEC.close()；清理可能被 launchd 接管的
+# ScreenCaptureKit helper，避免多路系统音频捕获长期堆积、使当前 AEC 参考失稳。
+AEC_HELPER_PIDS=$(pgrep -f "${PROJECT_DIR}/native/macos_system_audio_capture" 2>/dev/null)
+if [ -n "$AEC_HELPER_PIDS" ]; then
+    echo "  清理遗留的系统音频采集进程: $AEC_HELPER_PIDS"
+    kill $AEC_HELPER_PIDS 2>/dev/null
     sleep 1
 fi
 
