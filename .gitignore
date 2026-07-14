@@ -126,6 +126,7 @@ flutter_*.log
 # macOS build
 macos/Runner/*.entitlements.bak
 macos/Runner/AppDelegate.swift.bak
+native/macos_system_audio_capture
 
 # Windows build
 windows/runner/*.ico.bak

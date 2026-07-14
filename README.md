@@ -297,6 +297,24 @@ cp .env.example .env
 OPENCLAW_GATEWAY_TOKEN=你的OpenClaw Gateway令牌
 ```
 
+macOS 可选启用系统级回声消除。它使用整台设备的系统输出作为参考，既覆盖助手
+自身的 TTS，也覆盖浏览器、播放器等其他应用；不会改变任何应用的播放方式：
+
+```bash
+./scripts/build_macos_system_audio_capture.sh
+```
+
+随后在 `.env` 中启用：
+
+```bash
+VOICE_ASSISTANT_SYSTEM_AEC_ENABLED=true
+VOICE_ASSISTANT_SYSTEM_AEC_DELAY_MS=100
+VOICE_ASSISTANT_SYSTEM_AEC_REFERENCE_DELIVERY_MS=80
+```
+
+首次启动时需要授予“屏幕与系统音频录制”权限。helper 或 AEC 运行异常时会自动
+旁路，继续向现有 VAD、ASR、声纹和活体链路提供未经处理的原始麦克风音频。
+
 > **提示**：需在 `~/.openclaw/openclaw.json` 中确保 Gateway HTTP 端点已启用：
 
 ```json

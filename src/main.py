@@ -170,6 +170,11 @@ try:
 except ImportError:
     _soxr = None  # 无 soxr 时退回原始采样率，ASR 精度会下降
 
+try:
+    from system_audio_aec import SystemAudioAEC
+except ImportError:
+    SystemAudioAEC = None
+
 from tts import (
     text_to_speech_play,
     is_tts_playing,
@@ -458,7 +463,7 @@ def _extract_embedding(extractor, samples, sample_rate=16000):
     """从音频样本中提取声纹嵌入"""
     try:
         # 检查样本是否有效
-        if not samples or len(samples) == 0:
+        if samples is None or len(samples) == 0:
             print("[声纹] 提取嵌入失败: 样本为空")
             return None
         
@@ -502,21 +507,28 @@ def _verify_speaker(extractor, manager, samples, sample_rate=16000):
         return False, None, 0.0
     
     # 搜索最匹配的声纹
+    result = ""
+    score = 0.0
     try:
         emb_list = embedding.tolist()
         print(f"[声纹调试] 嵌入向量前5值: {emb_list[:5]}")
         print(f"[声纹调试] 已注册声纹: {manager.all_speakers}")
-        result = manager.search(emb_list, _SPEAKER_THRESHOLD)
-        print(f"[声纹调试] search result: '{result}', threshold: {_SPEAKER_THRESHOLD}")
-        if result:
-            # 计算相似度分数
-            score = manager.score(result, emb_list)
-            print(f"[声纹调试] score for '{result}': {score}")
+        scored = [
+            (float(manager.score(name, emb_list)), name)
+            for name in manager.all_speakers
+        ]
+        score, result = max(scored, default=(0.0, ""))
+        top_scores = sorted(scored, reverse=True)[:3]
+        print(
+            f"[声纹调试] best='{result}', score={score:.3f}, "
+            f"threshold={_SPEAKER_THRESHOLD}, top3={top_scores}"
+        )
+        if result and score >= _SPEAKER_THRESHOLD:
             return True, result, score
     except Exception as e:
         print(f"[声纹] 验证失败: {e}")
     
-    return False, None, 0.0
+    return False, result, score
 
 
 def _load_all_assistant_configs() -> tuple[dict, list]:
@@ -692,6 +704,41 @@ class VoiceAssistant:
         # sherpa-onnx 模型训练采样率为 16kHz，accept_waveform 必须喂 16kHz 数据；
         # 输入流保持 48kHz 兼容其他应用，在处理循环里用 soxr 重采样到 16kHz 再喂模型。
         self._asr_rate = 16000
+        self._system_audio_aec = None
+        if _env_bool("VOICE_ASSISTANT_SYSTEM_AEC_ENABLED", False):
+            helper = os.path.abspath(
+                os.getenv(
+                    "VOICE_ASSISTANT_SYSTEM_AEC_HELPER",
+                    os.path.join(
+                        os.path.dirname(__file__),
+                        "..",
+                        "native",
+                        "macos_system_audio_capture",
+                    ),
+                )
+            )
+            try:
+                if SystemAudioAEC is None:
+                    raise RuntimeError("system_audio_aec 模块不可用")
+                if not os.path.isfile(helper) or not os.access(helper, os.X_OK):
+                    raise RuntimeError(
+                        f"helper 不存在或不可执行: {helper}；请先运行 "
+                        "scripts/build_macos_system_audio_capture.sh"
+                    )
+                self._system_audio_aec = SystemAudioAEC(
+                    helper_path=helper,
+                    delay_ms=_env_int("VOICE_ASSISTANT_SYSTEM_AEC_DELAY_MS", 100),
+                    reference_delivery_ms=_env_int(
+                        "VOICE_ASSISTANT_SYSTEM_AEC_REFERENCE_DELIVERY_MS", 80
+                    ),
+                    diagnostics_seconds=_env_float(
+                        "VOICE_ASSISTANT_SYSTEM_AEC_DIAGNOSTICS_SECONDS", 0.0
+                    ),
+                )
+                print("[系统 AEC] helper 进程已拉起，等待系统音频参考就绪")
+            except Exception as exc:
+                print(f"[系统 AEC] 启动失败，继续使用原始麦克风: {exc}")
+                self._system_audio_aec = None
         # 激活生命周期联动：is_awake 是 property（见下），在 False↔True
         # 边沿自动派发钩子。先建注册表并接入已有联动（暂停媒体），
         # 再触发首次赋值——此时 manager 已就绪。
@@ -704,11 +751,13 @@ class VoiceAssistant:
         self.is_awake = False
         self.continuous_mode = False
         self.audio_queue = queue.Queue()
+        self.verification_audio_queue = queue.Queue()
         self.stop_event = threading.Event()
         self.last_voice_time = time.time()
         self.idle_timeout = _env_float("VOICE_ASSISTANT_IDLE_TIMEOUT_SECONDS", 30.0)
         self.last_activity_time = time.time()
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
+        self._wake_speaker_audio_buffer = []  # AEC 前同帧音频，仅供声纹比对
         self._wake_buffer_max_samples = int(self._asr_rate * 3)  # 最多存3秒（16kHz）
         # 实验：待机时以完整 ASR 话语替代专用 KWS。保留旧 KWS 路径作为回退，
         # VOICE_ASSISTANT_CONTINUOUS_WAKE_ASR=false 可随时关闭。
@@ -993,7 +1042,9 @@ class VoiceAssistant:
                 print("[VAD] VAD 配置创建失败: {}".format(e2))
                 self.vad_config = None
 
-    def _verify_speaker_on_wake(self, samples, sample_rate=16000):
+    def _verify_speaker_on_wake(
+        self, samples, sample_rate=16000, speaker_samples=None
+    ):
         """唤醒时验证声纹
         
         Returns:
@@ -1049,14 +1100,76 @@ class VoiceAssistant:
         if not self._verify_liveness_on_wake(samples, sample_rate):
             return False
 
-        is_verified, speaker_name, score = _verify_speaker(
-            self._speaker_extractor, self._speaker_manager, samples, sample_rate
+        media_aec_active = (
+            self._media_playing_on_wake
+            and self._system_audio_aec is not None
+            and self._system_audio_aec.healthy
         )
 
+        def _speaker_window(audio_input, label):
+            audio = np.asarray(audio_input, dtype=np.float32).reshape(-1)
+            max_window = int(
+                sample_rate
+                * _env_float(
+                    "VOICE_ASSISTANT_MEDIA_SPEAKER_WINDOW_SECONDS", 2.0
+                )
+            )
+            if len(audio) > max_window:
+                hop = max(1, int(sample_rate * 0.02))
+                framed = audio[: len(audio) // hop * hop].reshape(-1, hop)
+                frame_energy = np.mean(framed * framed, axis=1)
+                window_frames = max(1, max_window // hop)
+                window_energy = np.convolve(
+                    frame_energy,
+                    np.ones(window_frames, dtype=np.float32),
+                    mode="valid",
+                )
+                start = int(np.argmax(window_energy)) * hop
+                audio = audio[start : start + max_window]
+                print(
+                    f"[声纹] {label} 选取近端连续窗口: "
+                    f"{len(audio_input)} -> {len(audio)}"
+                )
+            return audio
+
+        clean_input = _speaker_window(samples, "clean") if media_aec_active else samples
+        candidates = [("clean", clean_input)]
+        if media_aec_active and speaker_samples is not None:
+            raw_input = _speaker_window(speaker_samples, "raw")
+            candidates.append(("raw", raw_input))
+            if len(raw_input) == len(clean_input):
+                # raw 保留音色但含媒体，clean 去回声但有音色域偏移；固定融合在不
+                # 降低声纹阈值的前提下折中两者。权重来自本机双讲实测。
+                blend_input = (
+                    np.asarray(raw_input, dtype=np.float32) * 0.65
+                    + np.asarray(clean_input, dtype=np.float32) * 0.35
+                )
+                candidates.append(("blend", blend_input))
+
+        best = (False, None, 0.0, "clean", clean_input)
+        for label, candidate in candidates:
+            verified, name, candidate_score = _verify_speaker(
+                self._speaker_extractor,
+                self._speaker_manager,
+                candidate,
+                sample_rate,
+            )
+            print(
+                f"[声纹] {label} 候选: name={name or '-'}, "
+                f"score={candidate_score:.3f}, pass={verified}"
+            )
+            if candidate_score > best[2]:
+                best = (verified, name, candidate_score, label, candidate)
+
+        is_verified, speaker_name, score, source, speaker_input = best
+
         if is_verified:
-            print(f"[声纹] 验证通过: {speaker_name} (score: {score:.3f})")
+            print(
+                f"[声纹] 验证通过: {speaker_name} "
+                f"(source={source}, score: {score:.3f})"
+            )
             self._verified_speaker_name = speaker_name
-            self._update_speaker_progressive(samples, sample_rate)
+            self._update_speaker_progressive(speaker_input, sample_rate)
             return True
         else:
             print(f"[声纹] 验证失败: 未识别到已注册声纹 (score: {score:.3f})")
@@ -1099,6 +1212,13 @@ class VoiceAssistant:
         mode = "enforce" if _MEDIA_WAKE_GUARD_ENFORCE else "shadow"
         print(f"[媒体门禁] {mode}: playing={playing}")
         if playing and _MEDIA_WAKE_GUARD_ENFORCE:
+            aec_healthy = bool(
+                self._system_audio_aec is not None
+                and self._system_audio_aec.healthy
+            )
+            if aec_healthy:
+                print("[媒体门禁] 系统 AEC 健康，媒体声已进入回声参考，允许继续验证")
+                return True
             print("[媒体门禁] 拒绝唤醒: 检测到本机正在播放媒体，疑似电脑重放")
             self._set_wake_rejection(
                 "media_playing",
@@ -1968,15 +2088,30 @@ class VoiceAssistant:
         """音频回调函数"""
         if status:
             print(status)
+        queued_audio = indata.copy()
+        verification_audio = queued_audio.copy()
+        if self._system_audio_aec is not None:
+            cleaned = self._system_audio_aec.process(queued_audio[:, 0])
+            if len(cleaned) == len(queued_audio):
+                queued_audio[:, 0] = cleaned
+            raw_delayed = self._system_audio_aec.last_delayed_raw
+            if len(raw_delayed) == len(verification_audio):
+                verification_audio[:, 0] = raw_delayed
         # 始终入队音频，保证处理期间（含TTS播报）也能检测唤醒词打断
         if self.audio_queue.qsize() < _env_int("VOICE_ASSISTANT_AUDIO_QUEUE_MAXSIZE", 100):
-            self.audio_queue.put(indata.copy())
+            self.audio_queue.put(queued_audio)
+            self.verification_audio_queue.put(verification_audio)
 
     def _clear_queue(self):
         """清空音频队列"""
         try:
             while True:
                 self.audio_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            while True:
+                self.verification_audio_queue.get_nowait()
         except queue.Empty:
             pass
 
@@ -1997,26 +2132,48 @@ class VoiceAssistant:
         standby_recognition_result = ""
         standby_last_result_time = time.time()
         standby_audio_buffer = []
+        standby_verification_buffer = []
+        deferred_wake_result = ""
+        deferred_wake_asr_prefix = ""
         # 仅保存 VAD 判定的当前说话段，供 KWS 提前命中时做声纹/活体验证。
         # 旧的 _wake_audio_buffer 是固定 3 秒滚动窗，会混入唤醒前的静音和环境声。
         wake_vad_audio_buffer = []
+        wake_vad_speaker_buffer = []
         wake_vad_active = False
 
         def _wake_verification_samples():
             if wake_vad_audio_buffer:
-                return [sample for buf in wake_vad_audio_buffer for sample in buf]
+                samples = [sample for buf in wake_vad_audio_buffer for sample in buf]
+                return samples[-int(self._asr_rate * 2.5):]
             # VAD 不可用时保留旧路径作为降级，但只取最近 2 秒，减少无关前导。
             fallback = [sample for buf in self._wake_audio_buffer for sample in buf]
+            return fallback[-int(self._asr_rate * 2.0):]
+
+        def _wake_speaker_verification_samples():
+            if wake_vad_speaker_buffer:
+                samples = [
+                    sample for buf in wake_vad_speaker_buffer for sample in buf
+                ]
+                return samples[-int(self._asr_rate * 2.5):]
+            fallback = [
+                sample for buf in self._wake_speaker_audio_buffer for sample in buf
+            ]
             return fallback[-int(self._asr_rate * 2.0):]
 
         def start_audio_stream():
             nonlocal audio_stream
             if audio_stream is None:
+                stream_kwargs = {}
+                if self._system_audio_aec is not None:
+                    # WebRTC APM 固定使用 10ms 帧；仅在 AEC 开启时约束块大小，
+                    # 关闭时完全保留原有 PortAudio 行为。
+                    stream_kwargs["blocksize"] = SystemAudioAEC.frame_samples
                 audio_stream = sd.InputStream(
                     channels=1,
                     dtype="float32",
                     samplerate=self.sample_rate,
                     callback=self._audio_callback,
+                    **stream_kwargs,
                 )
                 audio_stream.start()
 
@@ -2116,6 +2273,7 @@ class VoiceAssistant:
                         standby_recognition_result = ""
                         standby_last_result_time = time.time()
                         standby_audio_buffer = []
+                        standby_verification_buffer = []
                     if self._use_offline_asr:
                         vad_stream = None
                         _create_vad_stream()
@@ -2125,9 +2283,11 @@ class VoiceAssistant:
                         vad_stream = None
                         _create_vad_stream()
                     self._wake_audio_buffer.clear()
+                    self._wake_speaker_audio_buffer.clear()
                     self._vad_buffer.clear()
                     self._conv_audio_buffer.clear()
                     wake_vad_audio_buffer = []
+                    wake_vad_speaker_buffer = []
                     wake_vad_active = False
                     self.last_activity_time = time.time()
                     print("[音频设备] 音频流已切换到当前默认输入设备")
@@ -2148,6 +2308,7 @@ class VoiceAssistant:
                         standby_recognition_result = ""
                         standby_last_result_time = time.time()
                         standby_audio_buffer = []
+                        standby_verification_buffer = []
                     start_audio_stream()
                     time.sleep(0.05)
                     self._clear_queue()
@@ -2158,6 +2319,10 @@ class VoiceAssistant:
                 if self._is_processing and self._suppress_recognition_during_tts:
                     try:
                         audio_data = self.audio_queue.get(timeout=0.5)
+                        try:
+                            self.verification_audio_queue.get_nowait()
+                        except queue.Empty:
+                            pass
                     except queue.Empty:
                         # 处理期间麦克风假死会让打断监听失效；重建音频流以恢复，
                         # 但不动 _is_processing 等标志（由请求/TTS 线程负责复位）。
@@ -2218,6 +2383,12 @@ class VoiceAssistant:
 
                 try:
                     audio_data = self.audio_queue.get(timeout=0.5)
+                    try:
+                        verification_audio_data = (
+                            self.verification_audio_queue.get_nowait()
+                        )
+                    except queue.Empty:
+                        verification_audio_data = audio_data
                 except queue.Empty:
                     # 音频流假死兜底：不论待机还是已唤醒，只要持续拿不到帧就重建。
                     # 旧逻辑仅在 not is_awake 时重建，导致"唤醒态麦克风假死"时主循环
@@ -2248,14 +2419,23 @@ class VoiceAssistant:
 
                 samples = audio_data.reshape(-1)
                 asr_samples = self._resample_for_asr(samples)
+                verification_samples = verification_audio_data.reshape(-1)
+                verification_asr_samples = self._resample_for_asr(
+                    verification_samples
+                )
                 self.last_activity_time = time.time()
 
                 if not self.is_awake:
                     # 持续缓冲音频用于声纹验证（16kHz，与模型匹配）
                     self._wake_audio_buffer.append(asr_samples.tolist())
+                    self._wake_speaker_audio_buffer.append(
+                        verification_asr_samples.tolist()
+                    )
                     total_len = sum(len(b) for b in self._wake_audio_buffer)
                     while total_len > self._wake_buffer_max_samples:
                         removed = self._wake_audio_buffer.pop(0)
+                        if self._wake_speaker_audio_buffer:
+                            self._wake_speaker_audio_buffer.pop(0)
                         total_len -= len(removed)
 
                     # 维护 VAD 前后缓存（最近 2 秒，16kHz）
@@ -2282,12 +2462,24 @@ class VoiceAssistant:
                                     for sample in buf
                                 ][-int(self._asr_rate * 0.25):]
                                 wake_vad_audio_buffer = [pre_roll] if pre_roll else []
+                                speaker_pre_roll = [
+                                    sample
+                                    for buf in self._wake_speaker_audio_buffer
+                                    for sample in buf
+                                ][-int(self._asr_rate * 0.25):]
+                                wake_vad_speaker_buffer = (
+                                    [speaker_pre_roll] if speaker_pre_roll else []
+                                )
                                 wake_vad_active = True
                             else:
                                 wake_vad_audio_buffer.append(asr_samples.tolist())
+                                wake_vad_speaker_buffer.append(
+                                    verification_asr_samples.tolist()
+                                )
                         elif wake_vad_active:
                             # 一段话结束后才清空；KWS 通常会在 VAD 仍为 active 时命中。
                             wake_vad_audio_buffer = []
+                            wake_vad_speaker_buffer = []
                             wake_vad_active = False
 
                     # DND 解除瞬间：重建 KWS 流，清掉跨越勿扰边界残留的半个唤醒词，
@@ -2299,6 +2491,7 @@ class VoiceAssistant:
                             standby_recognition_result = ""
                             standby_last_result_time = time.time()
                             standby_audio_buffer = []
+                            standby_verification_buffer = []
                     self._prev_dnd_mode = _dnd_mode
 
                     # 实验路径：VAD 后的完整话语持续进入普通 ASR，endpoint 后再从
@@ -2306,9 +2499,14 @@ class VoiceAssistant:
                     # 此分支开启时不再并行跑 KWS，避免 KWS 提前命中并清掉后续指令。
                     if self._continuous_wake_asr:
                         standby_audio_buffer.append(asr_samples.tolist())
+                        standby_verification_buffer.append(
+                            verification_asr_samples.tolist()
+                        )
                         standby_total = sum(len(buf) for buf in standby_audio_buffer)
                         while standby_total > self._standby_utterance_max_samples:
                             standby_total -= len(standby_audio_buffer.pop(0))
+                            if standby_verification_buffer:
+                                standby_verification_buffer.pop(0)
 
                         standby_recognition_stream.accept_waveform(
                             self._asr_rate, asr_samples
@@ -2357,13 +2555,35 @@ class VoiceAssistant:
 
                             print(f"\n[实验] KWS 提前命中: {early_wake_result}")
                             wake_samples = _wake_verification_samples()
+                            speaker_wake_samples = (
+                                _wake_speaker_verification_samples()
+                            )
+                            early_min_samples = int(
+                                self._asr_rate
+                                * _env_float(
+                                    "VOICE_ASSISTANT_EARLY_WAKE_MIN_SECONDS", 2.5
+                                )
+                            )
+                            if len(wake_samples) < early_min_samples:
+                                print(
+                                    "[实验] 提前唤醒样本过短，延后到完整话语验证 "
+                                    f"({len(wake_samples)} < {early_min_samples})"
+                                )
+                                deferred_wake_result = early_wake_result
+                                deferred_wake_asr_prefix = (
+                                    standby_recognition_result.strip()
+                                )
+                                keyword_stream = self.keyword_spotter.create_stream()
+                                continue
                             if self._speaker_enabled:
                                 print(
                                     "[声纹] 唤醒词阶段立即进行声纹+活体验证 "
                                     f"(样本长度: {len(wake_samples)})"
                                 )
                                 if not self._verify_speaker_on_wake(
-                                    wake_samples, self._asr_rate
+                                    wake_samples,
+                                    self._asr_rate,
+                                    speaker_samples=speaker_wake_samples,
                                 ):
                                     print("[实验] 验证未通过，静默忽略")
                                     keyword_stream = self.keyword_spotter.create_stream()
@@ -2373,7 +2593,9 @@ class VoiceAssistant:
                                     standby_recognition_result = ""
                                     standby_last_result_time = time.time()
                                     standby_audio_buffer = []
+                                    standby_verification_buffer = []
                                     wake_vad_audio_buffer = []
+                                    wake_vad_speaker_buffer = []
                                     wake_vad_active = False
                                     continue
                                 self._speaker_verified = True
@@ -2427,15 +2649,59 @@ class VoiceAssistant:
                             if final_text:
                                 print(f"\n[待机 ASR] 完整话语: {final_text}")
                             wake_command = self._extract_standby_wake_command(final_text)
+                            if wake_command is None and deferred_wake_result:
+                                detected_id = self._detect_assistant_from_keyword(
+                                    deferred_wake_result
+                                )
+                                target_cfg = self.all_assistants.get(
+                                    detected_id, self.current_cfg
+                                )
+                                confirmed_wake_word = (
+                                    target_cfg.get("name") or deferred_wake_result
+                                )
+                                self._wake_asr_prefix = deferred_wake_asr_prefix
+                                command, stripped = (
+                                    self._strip_kws_confirmed_wake_prefix(final_text)
+                                )
+                                # KWS 已确认身份；若最终文本只有漂移后的助手名，
+                                # 这是纯唤醒而不是一条名为 JOVI/张瑞 的指令。
+                                if not stripped and final_text.strip() == deferred_wake_asr_prefix:
+                                    command = ""
+                                elif (
+                                    not stripped
+                                    and final_text.strip().isascii()
+                                    and final_text.strip().isalpha()
+                                ):
+                                    command = ""
+                                wake_command = (
+                                    detected_id,
+                                    confirmed_wake_word,
+                                    command,
+                                )
+                                print(
+                                    "[实验] 使用延后 KWS 身份恢复完整话语唤醒: "
+                                    f"{confirmed_wake_word}"
+                                )
+                            deferred_wake_result = ""
+                            deferred_wake_asr_prefix = ""
                             utterance_samples = [
                                 sample
                                 for buf in standby_audio_buffer
                                 for sample in buf
                             ]
+                            utterance_samples = utterance_samples[
+                                -int(self._asr_rate * 5.0):
+                            ]
+                            speaker_utterance_samples = [
+                                sample
+                                for buf in standby_verification_buffer
+                                for sample in buf
+                            ][-int(self._asr_rate * 5.0):]
                             standby_recognition_stream = self.recognizer.create_stream()
                             standby_recognition_result = ""
                             standby_last_result_time = time.time()
                             standby_audio_buffer = []
+                            standby_verification_buffer = []
 
                             if _dnd_mode or not wake_command:
                                 continue
@@ -2451,7 +2717,9 @@ class VoiceAssistant:
                                     f"(样本长度: {len(utterance_samples)})"
                                 )
                                 if not self._verify_speaker_on_wake(
-                                    utterance_samples, self._asr_rate
+                                    utterance_samples,
+                                    self._asr_rate,
+                                    speaker_samples=speaker_utterance_samples,
                                 ):
                                     print("[实验] 验证未通过，静默忽略")
                                     continue
@@ -2481,7 +2749,17 @@ class VoiceAssistant:
                             elif self._has_inflight_task():
                                 self._ask_resume_decision()
                             else:
-                                print("[实验] 未附带指令，等待下一句话...")
+                                self._pending_resume_decision = False
+                                wake_timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                                wake_only_text = (
+                                    f"voice-assistant-wake-up-{wake_timestamp}"
+                                )
+                                print("[实验] 未附带指令，发送纯 wake-up 上下文")
+                                threading.Thread(
+                                    target=self._on_recognized,
+                                    args=(wake_only_text,),
+                                    daemon=True,
+                                ).start()
                             continue
 
                         # endpoint 前留在待机 ASR 分支，不让旧 KWS 提前抢占。
@@ -2523,8 +2801,15 @@ class VoiceAssistant:
                             # ── 声纹验证 ──────────────────────────────────────
                             if self._speaker_enabled:
                                 wake_samples = _wake_verification_samples()
+                                speaker_wake_samples = (
+                                    _wake_speaker_verification_samples()
+                                )
                                 print(f"[声纹] 唤醒词检测成功，准备验证声纹 (样本长度: {len(wake_samples)})")
-                                is_verified = self._verify_speaker_on_wake(wake_samples, self._asr_rate)
+                                is_verified = self._verify_speaker_on_wake(
+                                    wake_samples,
+                                    self._asr_rate,
+                                    speaker_samples=speaker_wake_samples,
+                                )
                                 if not is_verified:
                                     reason = self._last_wake_rejection or {}
                                     title = reason.get("title", "验证未通过")
@@ -2536,10 +2821,12 @@ class VoiceAssistant:
                                         daemon=True,
                                     ).start()
                                     self._wake_audio_buffer.clear()
+                                    self._wake_speaker_audio_buffer.clear()
                                     self.keyword_spotter.reset_stream(keyword_stream)
                                     print("[声纹] 继续监听...")
                                     continue
                                 self._wake_audio_buffer.clear()
+                                self._wake_speaker_audio_buffer.clear()
                                 self._speaker_verified = True  # 标记唤醒者已通过声纹验证
 
                             # 识别是哪个 assistant 的唤醒词，并切换
@@ -3482,6 +3769,8 @@ class VoiceAssistant:
     def stop(self):
         """停止语音助手"""
         self.stop_event.set()
+        if self._system_audio_aec is not None:
+            self._system_audio_aec.close()
         print("语音助手已关闭。")
 
     def exit_standby(self, instant: bool = False):
