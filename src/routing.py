@@ -58,6 +58,10 @@ def is_obviously_light(text: str) -> bool:
     """明确允许快路径处理返回 True；否则 False（默认走 agent）。"""
     if not text:
         return False
+    # 唤醒前缀/问候可能与真实指令处于同一句。实时外部数据请求必须优先于
+    # 轻消息命中，否则诸如“Jarvis，目前世界杯情况怎么样”会被误送快路径。
+    if needs_live_data(text):
+        return False
     import light_store
     if light_store.should_handoff(text):
         return False
@@ -68,5 +72,7 @@ def handoff_intent(text: str) -> str:
     """返回强制升级 agent 的意图名；未命中返回空字符串。"""
     if not text:
         return ""
+    if needs_live_data(text):
+        return "live_data"
     import light_store
     return light_store.matched_agent_intent(text)
