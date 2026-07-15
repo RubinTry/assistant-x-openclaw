@@ -1,8 +1,10 @@
 {
-    "engine_comment": "主脑引擎，可选值：edwin（默认，项目内置）、openclaw、hermes",
-    "engine": "edwin",
+    "engine_comment": "主脑引擎，可选值：openclaw（默认）、edwin（项目内置）、hermes",
+    "engine": "openclaw",
     "fastRouterMode_comment": "是否启用快速路由模式：true 时轻量对话先走 Control Center 配置的快模型，重任务再升级到 agent；可降低响应延迟，但因路由/人设/记忆注入会额外消耗 token，通常约为普通 agent-only 模式的 1.2~1.7 倍。",
     "fastRouterMode": true,
+    "kwsMode_comment": "唤醒方式：true 使用传统 KWS 模型直接检测唤醒词；false 使用待机持续 ASR + KWS 辅助确认的新唤醒方式。修改后需重启语音助手。",
+    "kwsMode": false,
     "default": "jarvis",
     "overlay_debug_mode": false,
     "dock_autohide_on_wake_comment": "true 时助手激活期自动隐藏系统 Dock，退回待机还原（仅 macOS）",

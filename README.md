@@ -590,6 +590,21 @@ $HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/skills/assistant-
 
 ## 自定义配置
 
+### 切换唤醒方式
+
+在 `assistants.json` 顶层设置 `kwsMode`，修改后重启语音助手：
+
+```json
+{
+  "kwsMode": true
+}
+```
+
+- `true`：使用传统 KWS 模型直接检测唤醒词。只在 KWS 命中后进入声纹/活体验证和后续 ASR，响应更接近旧版本。
+- `false`：使用当前的“待机持续 ASR + KWS 辅助确认”方式，支持从同一句中继续提取“唤醒词 + 指令”。
+
+这是全局开关，对所有角色生效。配置值必须是 JSON 布尔值 `true` 或 `false`，不能写成字符串。
+
 ### 添加新角色
 
 1. 在 `assistants.json` 的 `assistants` 数组中添加新角色：

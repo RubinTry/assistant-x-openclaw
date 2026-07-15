@@ -543,6 +543,16 @@ def _load_all_assistant_configs() -> tuple[dict, list]:
     return default_config, enabled_assistants
 
 
+def _load_kws_mode() -> bool:
+    """读取顶层唤醒模式；缺省保持当前持续 ASR 行为。"""
+    with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    value = cfg.get("kwsMode", False)
+    if not isinstance(value, bool):
+        raise ValueError("assistants.json 顶层 kwsMode 必须是 true 或 false")
+    return value
+
+
 def _load_assistant_config(assistant_id: str = None) -> dict:
     """从 assistants.json 加载指定 assistant 的配置，返回 dict（兼容旧代码）"""
     with open(_ASSISTANTS_CFG_PATH, "r", encoding="utf-8") as f:
@@ -732,11 +742,10 @@ class VoiceAssistant:
         self._wake_audio_buffer = []  # 用于声纹验证的音频缓冲区
         self._wake_speaker_audio_buffer = []  # AEC 前同帧音频，仅供声纹比对
         self._wake_buffer_max_samples = int(self._asr_rate * 3)  # 最多存3秒（16kHz）
-        # 实验：待机时以完整 ASR 话语替代专用 KWS。保留旧 KWS 路径作为回退，
-        # VOICE_ASSISTANT_CONTINUOUS_WAKE_ASR=false 可随时关闭。
-        self._continuous_wake_asr = _env_bool(
-            "VOICE_ASSISTANT_CONTINUOUS_WAKE_ASR", True
-        )
+        # 顶层 kwsMode 是唤醒链路的唯一配置入口：true 走传统 KWS，false
+        # 保持当前“待机持续 ASR + KWS 辅助确认”。两条实现都保留在主循环中。
+        self._kws_mode = _load_kws_mode()
+        self._continuous_wake_asr = not self._kws_mode
         self._standby_utterance_max_samples = int(
             self._asr_rate
             * _env_float("VOICE_ASSISTANT_STANDBY_UTTERANCE_MAX_SECONDS", 8.0)
@@ -863,8 +872,8 @@ class VoiceAssistant:
         )
         print(f"唤醒词: {self._get_keywords()}")
         print(
-            "[实验] 待机持续 ASR 唤醒: "
-            + ("已启用" if self._continuous_wake_asr else "已关闭（使用 KWS）")
+            "[唤醒模式] "
+            + ("传统 KWS 模型" if self._kws_mode else "待机持续 ASR + KWS 辅助确认")
         )
         print("正在检测 OpenClaw 连接...")
         print("提示: 说出任意唤醒词即可唤醒对应的 assistant，支持连续对话")
@@ -2097,6 +2106,62 @@ class VoiceAssistant:
                 self.audio_queue.get_nowait()
         except queue.Empty:
             pass
+
+    def _collect_kws_verification_tail(
+        self,
+        samples,
+        speaker_samples,
+        *,
+        target_seconds=None,
+        max_wait_seconds=None,
+    ):
+        """KWS 提前命中时补齐当前话语尾部，供声纹和活体共同验证。
+
+        传统 KWS 常在唤醒词尚未说完时命中。AASIST-L 需要更完整的声学窗口，
+        因此仅在 KWS 模式下短暂消费后续麦克风帧；这些帧属于唤醒话语，激活后
+        本来也会被清空，不会吞掉用户随后单独说出的指令。
+        """
+        target_seconds = target_seconds or _env_float(
+            "VOICE_ASSISTANT_KWS_VERIFICATION_MIN_SECONDS", 2.5
+        )
+        max_wait_seconds = max_wait_seconds or _env_float(
+            "VOICE_ASSISTANT_KWS_VERIFICATION_MAX_WAIT_SECONDS", 2.0
+        )
+        target_samples = max(1, int(self._asr_rate * target_seconds))
+        clean = list([] if samples is None else samples)
+        raw = list([] if speaker_samples is None else speaker_samples)
+        if len(clean) >= target_samples:
+            return clean[-target_samples:], raw[-target_samples:]
+
+        initial_len = len(clean)
+        deadline = time.monotonic() + max(0.0, max_wait_seconds)
+        while len(clean) < target_samples:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                audio_data = self.audio_queue.get(timeout=min(0.1, remaining))
+            except queue.Empty:
+                continue
+            try:
+                verification_audio = self.verification_audio_queue.get_nowait()
+            except queue.Empty:
+                verification_audio = audio_data
+            clean.extend(
+                self._resample_for_asr(audio_data.reshape(-1)).tolist()
+            )
+            raw.extend(
+                self._resample_for_asr(verification_audio.reshape(-1)).tolist()
+            )
+
+        clean = clean[-target_samples:]
+        raw = raw[-target_samples:]
+        print(
+            "[KWS] 补齐活体/声纹验证窗口: "
+            f"{initial_len} -> {len(clean)} samples "
+            f"({len(clean) / self._asr_rate:.2f}s)"
+        )
+        return clean, raw
         try:
             while True:
                 self.verification_audio_queue.get_nowait()
@@ -2790,6 +2855,12 @@ class VoiceAssistant:
                                 wake_samples = _wake_verification_samples()
                                 speaker_wake_samples = (
                                     _wake_speaker_verification_samples()
+                                )
+                                wake_samples, speaker_wake_samples = (
+                                    self._collect_kws_verification_tail(
+                                        wake_samples,
+                                        speaker_wake_samples,
+                                    )
                                 )
                                 print(f"[声纹] 唤醒词检测成功，准备验证声纹 (样本长度: {len(wake_samples)})")
                                 is_verified = self._verify_speaker_on_wake(
