@@ -41,10 +41,11 @@ class MacOSVoiceAssistantService implements VoiceAssistantServiceBase {
     _addLog('正在启动语音助手...');
 
     try {
-      _pythonProcess = await Process.start(
-        '/bin/bash',
-        ['-l', '-c', 'cd $expandedPath && ./scripts/start.sh'],
-      );
+      _pythonProcess = await Process.start('/bin/bash', [
+        '-l',
+        '-c',
+        'cd $expandedPath && ./scripts/start.sh',
+      ]);
 
       if (!_shouldKeepRunning) {
         _pythonProcess!.kill();
@@ -137,7 +138,8 @@ class MacOSVoiceAssistantService implements VoiceAssistantServiceBase {
     for (final port in ports) {
       try {
         final result = await Process.run('lsof', ['-ti', ':$port']);
-        if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
+        if (result.exitCode == 0 &&
+            result.stdout.toString().trim().isNotEmpty) {
           final pids = result.stdout
               .toString()
               .split('\n')
@@ -170,7 +172,10 @@ class MacOSVoiceAssistantService implements VoiceAssistantServiceBase {
 
   Future<void> _killJarvisOverlay() async {
     try {
-      await Process.run('/usr/bin/osascript', ['-e', 'tell application "jarvis_overlay" to quit']);
+      await Process.run('/usr/bin/osascript', [
+        '-e',
+        'tell application "jarvis_overlay" to quit',
+      ]);
     } catch (_) {}
     try {
       await Process.run('/usr/bin/pkill', ['-f', 'jarvis_overlay']);
@@ -179,6 +184,11 @@ class MacOSVoiceAssistantService implements VoiceAssistantServiceBase {
 
   void _addLog(String message) {
     _outputController.add(message);
+  }
+
+  Future<String> _readApiToken() async {
+    final file = File('$expandedPath/data/runtime/local_api.token');
+    return (await file.readAsString()).trim();
   }
 
   @override
@@ -191,11 +201,14 @@ class MacOSVoiceAssistantService implements VoiceAssistantServiceBase {
     // Python 端 18790 是 HTTP server（do_POST 认 /dnd、/dnd/disable）。
     // 必须发真正的 HTTP POST；裸 TCP 字符串会被当成畸形请求丢弃，DND 不会生效。
     try {
-      final client = HttpClient();
       final path = enabled ? '/dnd' : '/dnd/disable';
+      final token = await _readApiToken();
+      if (token.isEmpty) return false;
+      final client = HttpClient();
       final req = await client
           .postUrl(Uri.parse('http://127.0.0.1:18790$path'))
           .timeout(const Duration(seconds: 2));
+      req.headers.set('X-Assistant-Token', token);
       final resp = await req.close();
       await resp.drain<void>();
       client.close();

@@ -19,9 +19,10 @@ class WindowsVoiceAssistantService implements VoiceAssistantServiceBase {
   bool get isRunning => _pythonProcess != null && !_processExited;
 
   String get expandedPath {
-    final home = Platform.environment['USERPROFILE'] ?? 
-                 Platform.environment['HOME'] ?? 
-                 'C:\\Users\\${Platform.environment['USERNAME']}';
+    final home =
+        Platform.environment['USERPROFILE'] ??
+        Platform.environment['HOME'] ??
+        'C:\\Users\\${Platform.environment['USERNAME']}';
     return '$home\\.openclaw\\workspace\\voice-assistant\\assistant-x-openclaw';
   }
 
@@ -43,7 +44,7 @@ class WindowsVoiceAssistantService implements VoiceAssistantServiceBase {
       _addLog('正在启动中，请稍候...');
       return;
     }
-    
+
     _isStarting = true;
     _shouldKeepRunning = true;
     _processExited = false;
@@ -223,6 +224,11 @@ class WindowsVoiceAssistantService implements VoiceAssistantServiceBase {
     _outputController.add(message);
   }
 
+  Future<String> _readApiToken() async {
+    final file = File('$expandedPath\\data\\runtime\\local_api.token');
+    return (await file.readAsString()).trim();
+  }
+
   @override
   void addLog(String message) {
     _outputController.add(message);
@@ -233,11 +239,14 @@ class WindowsVoiceAssistantService implements VoiceAssistantServiceBase {
     // Python 端 18790 是 HTTP server（do_POST 认 /dnd、/dnd/disable）。
     // 必须发真正的 HTTP POST；裸 TCP 字符串会被当成畸形请求丢弃，DND 不会生效。
     try {
-      final client = HttpClient();
       final path = enabled ? '/dnd' : '/dnd/disable';
+      final token = await _readApiToken();
+      if (token.isEmpty) return false;
+      final client = HttpClient();
       final req = await client
           .postUrl(Uri.parse('http://127.0.0.1:18790$path'))
           .timeout(const Duration(seconds: 2));
+      req.headers.set('X-Assistant-Token', token);
       final resp = await req.close();
       await resp.drain<void>();
       client.close();

@@ -22,6 +22,8 @@ import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
+from local_api_auth import authorize_request, rotate_runtime_token
+
 
 def _detect_best_provider() -> str:
     """根据硬件平台自动选择最优 provider"""
@@ -39,6 +41,8 @@ API_PORT = 18790
 class _ExitAPIHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         global _dnd_mode
+        if not authorize_request(self):
+            return
         # 注：模型表读写不在此 HTTP server 上——它只在助手启动时监听，而模型配置
         # 需在启动前就能做。改由 Control Center 直接调 venv 子进程 scripts/model_cli.py
         # 读写 model_table.json（助手运行时每轮读文件，配置改动自动生效）。
@@ -92,37 +96,8 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
             }).encode())
             return
 
-        # 摄像头抓帧：抓一帧 JPEG 直接回给调用方（Hermes 用 curl -o 落地后交 vision_analyze）
-        if self.path.startswith("/camera/snapshot"):
-            import tempfile
-            from camera import get_camera_controller
-
-            cam = get_camera_controller()
-            if not cam.is_available():
-                self.send_response(503)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": "camera unavailable"}).encode())
-                return
-            out = os.path.join(tempfile.gettempdir(), "jarvis_cam_snapshot.jpg")
-            path = cam.capture(out)
-            if path and os.path.exists(path) and os.path.getsize(path) > 0:
-                data = open(path, "rb").read()
-                self.send_response(200)
-                self.send_header("Content-Type", "image/jpeg")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-            else:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(
-                    {"error": "capture failed (摄像头未授权？首次需在控制中心授权)"}
-                ).encode())
-        else:
-            self.send_response(404)
-            self.end_headers()
+        self.send_response(404)
+        self.end_headers()
 
     def log_message(self, format, *args):
         pass
@@ -131,6 +106,7 @@ class _ExitAPIHandler(BaseHTTPRequestHandler):
 def _start_api_server():
     # start.sh 清理端口与本进程绑定之间存在竞争窗口（僵尸进程刚退出、TIME_WAIT
     # 未释放等），单次绑定失败不代表端口长期不可用，重试几次再放弃。
+    rotate_runtime_token()
     server = None
     last_err = None
     for attempt in range(5):

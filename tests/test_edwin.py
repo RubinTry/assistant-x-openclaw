@@ -146,12 +146,11 @@ class EdwinSecurityTests(unittest.TestCase):
 
     def test_stand_down_uses_bounded_delay_and_local_exit_endpoint(self):
         registry = default_registry()
-        response = mock.Mock()
-        response.raise_for_status.return_value = None
-        with mock.patch("edwin.tools.builtin.requests.post", return_value=response) as post:
+        response = mock.MagicMock()
+        with mock.patch("local_api_auth.post_local_api", return_value=response) as post:
             result = registry.get("stand_down").handler({"delay_seconds": 0}, threading.Event())
         self.assertTrue(result.ok)
-        post.assert_called_once_with("http://127.0.0.1:18790/exit", timeout=5)
+        post.assert_called_once_with("exit", timeout=5)
 
     def test_soft_stop_does_not_discard_pending_approval(self):
         bridge = object.__new__(EdwinBridge)

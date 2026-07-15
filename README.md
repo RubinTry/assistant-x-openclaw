@@ -554,15 +554,39 @@ unner\Release\` 目录下。
 - 贾维斯："stand down"、"you may leave"
 - 林妹妹："退下吧"、"你可以退下了"
 
-**2. AI 判定用户有让助手待机的意图**
+**2. Agent 判定用户有生命周期操作意图**
 
-当用户说的话虽然没有直接命中退出关键词，但 AI 判断用户想让助手退下时，会自动调用 API 远程退出：
+当指令没有直接命中退出关键词，或者包含熄屏、锁屏、延迟退下等组合动作时，Agent 应使用项目自带的 `assistant-lifecycle` 技能规划并执行完整流程。该技能只开放固定动作，不允许模型自行拼装本地 HTTP 请求或任意 Shell 命令。
 
-```bash
-curl -X POST http://127.0.0.1:18790/exit
+#### 为 Hermes / OpenClaw 安装技能
+
+项目只提供技能源码，不替 Hermes/OpenClaw 写入或管理其私有技能目录。请把下面相应提示词直接发给当前 Agent，由它使用自身的技能安装机制完成安装。
+
+Hermes 安装提示词：
+
+```text
+请安装并启用本机已有的 assistant-lifecycle 技能。技能源文件的完整路径是：
+$HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/skills/assistant-lifecycle/SKILL.md
+
+请先读取并检查该 SKILL.md，再使用 Hermes 自己的技能管理机制把它安装到当前 profile，
+确保它处于 enabled 状态，并确认新会话的 available_skills 中确实出现 assistant-lifecycle。
+不要改写技能中的脚本路径，不要自行改用 curl 或直接请求 127.0.0.1:18790。
+如果需要重启 Gateway 或新建会话才能加载，请执行并明确告诉我最终验证结果。
 ```
 
-比如用户说"好了好了我知道了你去吧"，AI 识别到待机意图后就会自动触发退出。
+OpenClaw 安装提示词：
+
+```text
+请安装并启用本机已有的 assistant-lifecycle 技能。技能源文件的完整路径是：
+$HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/skills/assistant-lifecycle/SKILL.md
+
+请先读取并检查该 SKILL.md，再使用 OpenClaw 自己的技能安装机制把它安装到当前 Agent，
+并确认新会话的可用技能列表中确实出现 assistant-lifecycle。
+不要改写技能中的脚本路径，不要自行改用 curl 或直接请求 127.0.0.1:18790。
+如果需要重启 Gateway 或新建会话才能加载，请执行并明确告诉我最终验证结果。
+```
+
+仅看到目标目录中存在 `SKILL.md` 不代表安装成功；必须以引擎新会话的可用技能列表中出现 `assistant-lifecycle` 为准。
 
 ## 自定义配置
 
@@ -808,12 +832,13 @@ open cloud : OpenClaw
 
 ### API 接口
 
-本地 HTTP 接口监听 `127.0.0.1:18790`（控制中心也通过它联动语音助手）。
+本地 HTTP 接口监听 `127.0.0.1:18790`（控制中心也通过它联动语音助手）。所有状态修改请求都必须携带主程序每次启动生成的认证令牌；项目脚本会自动读取令牌。
 
 **远程退出：**
 
 ```bash
-curl -X POST http://127.0.0.1:18790/exit
+$HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/venv/bin/python \
+  $HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/scripts/local_api_client.py exit
 ```
 
 返回：
@@ -827,25 +852,14 @@ curl -X POST http://127.0.0.1:18790/exit
 也可手动控制：
 
 ```bash
-curl -X POST http://127.0.0.1:18790/dnd          # 进入勿扰：暂停唤醒词响应
-curl -X POST http://127.0.0.1:18790/dnd/disable  # 解除勿扰：恢复唤醒
+$HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/venv/bin/python \
+  $HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/scripts/local_api_client.py dnd          # 进入勿扰
+$HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/venv/bin/python \
+  $HOME/.openclaw/workspace/voice-assistant/assistant-x-openclaw/scripts/local_api_client.py dnd-disable  # 解除勿扰
 ```
 
 > 端口被占导致接口未监听时勿扰不会生效（控制中心会在录入日志里给出警告）。
-> 主程序启动绑定该端口已带重试，`start.sh` 也会预清理 18790。
-
-**摄像头抓帧（供 Hermes「用摄像头看看我」）：**
-
-`GET /camera/snapshot` 抓一帧并直接返回 JPEG，主脑（Hermes/OpenClaw）可经此拿到画面再交给 `vision_analyze`：
-
-```bash
-curl -s http://127.0.0.1:18790/camera/snapshot -o /tmp/cam.jpg   # 成功：JPEG 落地
-# 失败返回 JSON：{"error": "..."}（摄像头不可用 503 / 抓帧失败 500）
-```
-
-- 抓帧复用仓库自带的 **imageio-ffmpeg**（静态 ffmpeg 含 avfoundation），免装系统工具；实现见 [src/camera.py](src/camera.py)，默认 1920x1080@30、丢弃前 8 帧预热、8s 超时软失败。
-- **首次需授权**：抓帧进程由控制中心拉起，摄像头权限归控制中心。已在其 `Info.plist` 加 `NSCameraUsageDescription`——**改的是源码，需重新 `flutter build macos` 覆盖安装 `/Applications/control_center.app` 才进包**；之后首次调用会弹「控制中心想使用摄像头」，点允许即永久生效（与 Dock 自动隐藏的授权同理）。
-- 仅 macOS；非 macOS 或未授权超时均返回错误、不影响其他功能。
+> 主程序启动绑定该端口已带重试，`start.sh` 也会预清理 18790。认证令牌保存在 `data/runtime/local_api.token`，目录和文件仅当前用户可读；不要把令牌复制进命令历史或日志。
 
 ## 常见问题
 
@@ -916,7 +930,6 @@ assistant-x-openclaw/
 │   ├── lifecycle.py          # 激活联动钩子注册表（唤醒/休眠边沿派发）
 │   ├── media_pause.py        # 激活联动：唤醒时暂停媒体
 │   ├── dock_control.py       # 激活联动：唤醒时隐藏 Dock（macOS）
-│   ├── camera.py             # 摄像头抓帧（GET /camera/snapshot，macOS）
 │   ├── anti_spoof.py         # 声音活体检测（AASIST-L）
 │   ├── notify_bridge.py      # 向控制中心推送通知（如声纹拒绝）
 │   ├── log_setup.py          # 日志：ERROR 落盘 + diag 诊断日志

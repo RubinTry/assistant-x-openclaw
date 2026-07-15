@@ -152,3 +152,4 @@ data/.model_key
 data/voice_context/
 # Edwin 会话、长期记忆与工具审计（本机运行时数据）
 data/edwin/
+data/runtime/

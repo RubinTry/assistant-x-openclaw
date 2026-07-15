@@ -15,6 +15,7 @@ import json
 import os
 import threading
 import time
+import stat
 from collections import deque
 
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +24,32 @@ _MAX_CONTENT_CHARS = 4000
 _MAX_FILE_BYTES = 2 * 1024 * 1024
 _TRIM_KEEP_LINES = 1200
 _lock = threading.RLock()
+
+
+def _ensure_private_store() -> None:
+    os.makedirs(_STORE_DIR, mode=0o700, exist_ok=True)
+    if os.name != "nt":
+        os.chmod(_STORE_DIR, 0o700)
+
+
+def _reject_symlink(path: str) -> None:
+    try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            raise OSError("refusing to use a symlinked voice context file")
+    except FileNotFoundError:
+        return
+
+
+def _open_private(path: str, *, append: bool):
+    _ensure_private_store()
+    _reject_symlink(path)
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if append else os.O_TRUNC)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags, 0o600)
+    if os.name != "nt":
+        os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "a" if append else "w", encoding="utf-8")
 
 
 def _norm(agent_id: str) -> str:
@@ -61,9 +88,8 @@ def append_turn(
     }
     try:
         with _lock:
-            os.makedirs(_STORE_DIR, exist_ok=True)
             p = _path(agent_id)
-            with open(p, "a", encoding="utf-8") as f:
+            with _open_private(p, append=True) as f:
                 f.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")))
                 f.write("\n")
             _trim_if_needed(p)
@@ -124,6 +150,10 @@ def _read_tail(agent_id: str, max_lines: int = 200) -> list[dict]:
     out = []
     try:
         with _lock:
+            _ensure_private_store()
+            _reject_symlink(p)
+            if os.name != "nt":
+                os.chmod(p, 0o600)
             with open(p, "r", encoding="utf-8") as f:
                 lines = deque(f, maxlen=max_lines)
         for line in lines:
@@ -145,8 +175,14 @@ def _trim_if_needed(path: str) -> None:
         with open(path, "r", encoding="utf-8") as f:
             lines = deque(f, maxlen=_TRIM_KEEP_LINES)
         tmp = f"{path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        with _open_private(tmp, append=False) as f:
             f.writelines(lines)
         os.replace(tmp, path)
+        if os.name != "nt":
+            os.chmod(path, 0o600)
     except OSError:
         return

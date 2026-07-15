@@ -347,10 +347,11 @@ def default_registry() -> ToolRegistry:
         if cancel.wait(delay):
             return ToolResult(False, error="request cancelled")
         try:
-            response = requests.post("http://127.0.0.1:18790/exit", timeout=5)
-            response.raise_for_status()
+            from local_api_auth import post_local_api
+            with post_local_api("exit", timeout=5) as response:
+                response.read()
             return ToolResult(True, content="voice assistant entered standby")
-        except requests.RequestException as exc:
+        except Exception as exc:
             return ToolResult(False, error=f"could not enter standby: {exc}")
 
     # These are bounded, reversible local session controls. The user's direct

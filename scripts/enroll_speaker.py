@@ -23,7 +23,7 @@ MODEL_PATH = os.path.join(
     PROJECT_DIR, "models", "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
 )
 ASR_MODEL_DIR = os.path.join(
-    PROJECT_DIR, "models", "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
+    PROJECT_DIR, "models", "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
 )
 
 
@@ -35,11 +35,11 @@ def log(msg):
 
 def set_dnd_mode(enabled: bool):
     """通过 HTTP 请求启用/禁用 DND 模式"""
-    import urllib.request
+    sys.path.insert(0, os.path.join(PROJECT_DIR, "src"))
+    from local_api_auth import post_local_api
     try:
-        url = f"http://127.0.0.1:18790/{'dnd' if enabled else 'dnd/disable'}"
-        req = urllib.request.Request(url, method='POST')
-        with urllib.request.urlopen(req, timeout=2) as resp:
+        path = "dnd" if enabled else "dnd/disable"
+        with post_local_api(path, timeout=2) as resp:
             resp.read()
     except Exception:
         pass
@@ -60,43 +60,70 @@ def save_speakers(speakers):
 
 
 def create_recognizer():
-    """创建语音识别器"""
+    """创建与主程序共用的 SenseVoice 离线识别器。"""
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--asr-tokens",
-        default=os.path.join(ASR_MODEL_DIR, "tokens.txt"),
-    )
-    parser.add_argument(
-        "--asr-encoder",
-        default=os.path.join(ASR_MODEL_DIR, "encoder-epoch-99-avg-1.onnx"),
-    )
-    parser.add_argument(
-        "--asr-decoder",
-        default=os.path.join(ASR_MODEL_DIR, "decoder-epoch-99-avg-1.onnx"),
-    )
-    parser.add_argument(
-        "--asr-joiner",
-        default=os.path.join(ASR_MODEL_DIR, "joiner-epoch-99-avg-1.onnx"),
-    )
-    parser.add_argument("--provider", default="cpu")
+    parser.add_argument("--asr-tokens", default=os.path.join(ASR_MODEL_DIR, "tokens.txt"))
+    parser.add_argument("--asr-model", default=os.path.join(ASR_MODEL_DIR, "model.int8.onnx"))
     args = parser.parse_args([])
-    return sherpa_onnx.OnlineRecognizer.from_transducer(
+    return sherpa_onnx.OfflineRecognizer.from_sense_voice(
+        model=args.asr_model,
         tokens=args.asr_tokens,
-        encoder=args.asr_encoder,
-        decoder=args.asr_decoder,
-        joiner=args.asr_joiner,
-        num_threads=1,
-        sample_rate=16000,
-        feature_dim=80,
-        decoding_method="greedy_search",
-        provider=args.provider,
-        # 开启端点检测：增量喂入时用静音停顿来切句，
-        # 每念一次「Is JARVIS here」之间的停顿即触发一次端点，吐出该次结果。
-        enable_endpoint_detection=True,
-        rule1_min_trailing_silence=2.4,
-        rule2_min_trailing_silence=0.8,
-        rule3_min_utterance_length=20,
+        num_threads=2,
+        use_itn=True,
+        language="auto",
     )
+
+
+def recognize_audio(recognizer, samples, sample_rate=16000):
+    """识别一段已经按静音切好的音频，空段返回空字符串。"""
+    samples = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if len(samples) < int(sample_rate * 0.2):
+        return ""
+    stream = recognizer.create_stream()
+    stream.accept_waveform(sample_rate, samples)
+    recognizer.decode_stream(stream)
+    return (stream.result.text or "").strip()
+
+
+def completed_speech_segments(samples, sample_rate=16000, *, final=False):
+    """返回当前缓冲中已被尾部静音封口的语音区间。
+
+    录制仍在继续时保留最后 0.45 秒作为判定窗口，避免把一句尚未说完的话
+    提前送去离线识别；录制结束时则刷新最后一段。
+    """
+    import librosa
+
+    samples = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if not len(samples):
+        return []
+    raw_intervals = librosa.effects.split(
+        samples,
+        top_db=28,
+        frame_length=512,
+        hop_length=160,
+    )
+    # SenseVoice 对完整短句明显优于零碎音节。合并 180ms 内的小停顿，避免
+    # “Is JARVIS here”被呼吸、爆破音切成数段后分别产生无意义结果。
+    merge_gap = int(sample_rate * 0.18)
+    max_segment = int(sample_rate * 4.5)
+    intervals = []
+    for start, end in raw_intervals:
+        start, end = int(start), int(end)
+        if (
+            intervals
+            and start - intervals[-1][1] <= merge_gap
+            and end - intervals[-1][0] <= max_segment
+        ):
+            intervals[-1] = (intervals[-1][0], end)
+        else:
+            intervals.append((start, end))
+    cutoff = len(samples) if final else max(0, len(samples) - int(sample_rate * 0.45))
+    minimum = int(sample_rate * 0.25)
+    return [
+        (start, end)
+        for start, end in intervals
+        if end <= cutoff and end - start >= minimum
+    ]
 
 
 def enroll_speaker():
@@ -155,49 +182,50 @@ def enroll_speaker():
         )
 
         recognized_texts = []
-
-        # 单 stream 增量喂入：每秒只喂"新增"的那一段音频，靠端点检测切句。
-        # 比每秒重建 stream、重喂整段累积音频省 CPU（O(n) 而非 O(n²)）。
-        stream = recognizer.create_stream()
-        last_pos = 0
+        recognized_until = 0
 
         for i in range(duration, 0, -1):
             log(f"录音中... {i}秒")
             time.sleep(1)
 
-            current_pos = int((duration - i) * sample_rate)
-            if current_pos > last_pos:
-                chunk = recording[last_pos:current_pos].flatten()
-                last_pos = current_pos
-                stream.accept_waveform(sample_rate, chunk)
-                while recognizer.is_ready(stream):
-                    recognizer.decode_stream(stream)
-                # 一次停顿（端点）= 一次完整的「Is JARVIS here」，吐出并重置
-                if recognizer.is_endpoint(stream):
-                    text = recognizer.get_result(stream)
-                    if text:
-                        recognized_texts.append(text)
-                        log(f"  识别: {text}")
-                    recognizer.reset(stream)
+            # sd.rec 非阻塞地持续填充 recording；每秒扫描一次已经结束于静音的
+            # 语音段，使用 SenseVoice 离线识别。最后一段未结束时暂不抢跑。
+            current_pos = min(int((duration - i + 1) * sample_rate), len(recording))
+            captured = recording[:current_pos].flatten().copy()
+            for start, end in completed_speech_segments(captured, sample_rate):
+                if end <= recognized_until:
+                    continue
+                text = recognize_audio(recognizer, captured[start:end], sample_rate)
+                recognized_until = end
+                if text:
+                    recognized_texts.append(text)
+                    log(f"  识别: {text}")
 
         log("录音完成！")
         sd.wait()
 
-        # 末尾再补一段尾部静音并 input_finished()，把最后一次还没触发端点的结果刷出来
-        tail = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
-        stream.accept_waveform(sample_rate, tail)
-        stream.input_finished()
-        while recognizer.is_ready(stream):
-            recognizer.decode_stream(stream)
-        text = recognizer.get_result(stream)
-        if text:
-            recognized_texts.append(text)
-            log(f"  识别: {text}")
+        # 刷新包括最后一秒在内的完整录音，确保最后一句不会因缺少尾部轮询而丢失。
+        complete_recording = recording.flatten().copy()
+        for start, end in completed_speech_segments(
+            complete_recording, sample_rate, final=True
+        ):
+            if end <= recognized_until:
+                continue
+            text = recognize_audio(
+                recognizer, complete_recording[start:end], sample_rate
+            )
+            recognized_until = end
+            if text:
+                recognized_texts.append(text)
+                log(f"  识别: {text}")
 
         log("\n" + "=" * 50)
         log("识别结果:")
         for t in recognized_texts:
             log(f"  - {t}")
+        if not recognized_texts:
+            log("  [错误] 未识别到有效语音，请检查麦克风后重新录入")
+            raise RuntimeError("声纹录入未通过语音识别检查")
         log("=" * 50)
 
         timestamp = int(time.time() * 1000)
