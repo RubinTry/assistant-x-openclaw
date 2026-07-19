@@ -818,7 +818,6 @@ models/aasist-l.onnx.data
 项目预配置了技术热词，你也可以自定义：
 
 - `hotwords.txt`：中文热词（技术术语、编程语言等）
-- `hotwords_en.txt`：英文热词（框架、工具等）
 
 **添加热词：**
 
@@ -975,7 +974,6 @@ assistant-x-openclaw/
 │   └── global.txt            # 自动生成，合并所有唤醒词
 ├── assistants.json           # 角色与引擎配置文件
 ├── hotwords.txt              # 中文热词
-├── hotwords_en.txt           # 英文热词
 ├── text_corrections.txt      # 文本纠错表（OOV 英文整词兜底）
 ├── .env                      # 环境变量
 └── requirements.txt          # Python 依赖

@@ -89,6 +89,24 @@ def _resolve_endpoint(profile: str):
     return f"http://{host}:{port}", key
 
 
+def _message_text(content) -> str:
+    """Flatten the text-bearing shapes used by OpenAI/Hermes messages."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+        elif isinstance(text, dict) and isinstance(text.get("value"), str):
+            parts.append(text["value"])
+    return "".join(parts)
+
+
 class HermesBridge:
     def __init__(
         self,
@@ -408,13 +426,16 @@ class HermesBridge:
         request_id = self.start_request()
         logger.info("发送(流式 Hermes): %s [request_id=%s]", text, request_id)
 
+        request_messages = self._build_messages(text)
+        submitted_user_text = _message_text(request_messages[-1].get("content", ""))
+
         try:
             resp = requests.post(
                 f"{self.gateway_url}/v1/chat/completions",
                 headers=self._headers(),
                 json={
                     "model": self.profile,
-                    "messages": self._build_messages(text),
+                    "messages": request_messages,
                     "stream": True,
                 },
                 stream=True,
@@ -432,6 +453,8 @@ class HermesBridge:
             full_reply = ""
             started = False
             soft_stopped = False  # 本地快照，减少锁竞争
+            finish_reason = None
+            stream_error = None
 
             for line in resp.iter_lines(decode_unicode=True):
                 # 硬取消：快速路由「中断任务」意图 → 断开连接
@@ -450,7 +473,12 @@ class HermesBridge:
 
                 try:
                     chunk_data = json.loads(line)
-                    delta = chunk_data.get("choices", [{}])[0].get("delta", {})
+                    choices = chunk_data.get("choices") or [{}]
+                    choice = choices[0]
+                    delta = choice.get("delta") or {}
+                    finish_reason = choice.get("finish_reason") or finish_reason
+                    if isinstance(chunk_data.get("error"), dict):
+                        stream_error = chunk_data["error"].get("message") or stream_error
                     content = delta.get("content", "")
                     if content:
                         if not started and not soft_stopped:
@@ -476,6 +504,23 @@ class HermesBridge:
                 self._soft_stopped_requests.discard(request_id)
                 self._cancelled_requests.discard(request_id)
 
+            # Some Ollama-backed models finish the Hermes agent turn and persist
+            # the final assistant message without ever firing a text delta.  Do
+            # not retry the chat request here: that could execute tools twice.
+            # Recover only an assistant message that follows this exact user
+            # message in the same Hermes session.
+            if not full_reply and not final_soft_stopped and finish_reason == "stop":
+                recovered = self._recover_session_reply(submitted_user_text)
+                if recovered:
+                    full_reply = recovered
+                    logger.info("Hermes 空流恢复: 从 session 取回最终回复 (%d 字)", len(recovered))
+                    if not started:
+                        started = True
+                        if on_start:
+                            on_start()
+                    if on_chunk:
+                        on_chunk(recovered)
+
             if on_end and not final_soft_stopped:
                 on_end()
             if full_reply and not final_soft_stopped:
@@ -484,7 +529,10 @@ class HermesBridge:
             elif final_soft_stopped:
                 logger.info("软停止：agent 继续执行，TTS 已静默")
             else:
-                logger.warning("Hermes 流式空回复: 未收到 content chunk")
+                detail = f"; finish_reason={finish_reason or 'unknown'}"
+                if stream_error:
+                    detail += f"; error={stream_error[:200]}"
+                logger.warning("Hermes 流式空回复: 未收到 content chunk%s", detail)
                 print("[Hermes] ⚠ chat/completions 流式返回空文本")
             return full_reply if full_reply else None
 
@@ -500,6 +548,39 @@ class HermesBridge:
                 if self._current_request_id == request_id:
                     self._current_request_id = None
             return None
+
+    def _recover_session_reply(self, submitted_user_text: str) -> str:
+        """Recover this turn's persisted final reply after a content-less SSE."""
+        try:
+            resp = requests.get(
+                f"{self.gateway_url}/api/sessions/{self.session_id}/messages",
+                headers=self._headers(),
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                logger.warning("Hermes 空流恢复失败: session messages HTTP %s", resp.status_code)
+                return ""
+            messages = resp.json().get("data", [])
+            matching_user_index = None
+            for index in range(len(messages) - 1, -1, -1):
+                message = messages[index]
+                if (
+                    message.get("role") == "user"
+                    and _message_text(message.get("content")) == submitted_user_text
+                ):
+                    matching_user_index = index
+                    break
+            if matching_user_index is None:
+                return ""
+            for message in reversed(messages[matching_user_index + 1:]):
+                if message.get("role") == "assistant":
+                    reply = _message_text(message.get("content"))
+                    if reply.strip():
+                        return reply
+            return ""
+        except Exception as exc:
+            logger.warning("Hermes 空流恢复异常: %s", exc)
+            return ""
 
     def _record_voice_turn(self, user_text: str, assistant_text: str) -> None:
         # 回写时刷新活动时钟：长耗时 turn（如浏览器任务）结束后，下一轮不因空闲阈值误滚。
