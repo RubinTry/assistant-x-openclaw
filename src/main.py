@@ -2106,62 +2106,6 @@ class VoiceAssistant:
                 self.audio_queue.get_nowait()
         except queue.Empty:
             pass
-
-    def _collect_kws_verification_tail(
-        self,
-        samples,
-        speaker_samples,
-        *,
-        target_seconds=None,
-        max_wait_seconds=None,
-    ):
-        """KWS 提前命中时补齐当前话语尾部，供声纹和活体共同验证。
-
-        传统 KWS 常在唤醒词尚未说完时命中。AASIST-L 需要更完整的声学窗口，
-        因此仅在 KWS 模式下短暂消费后续麦克风帧；这些帧属于唤醒话语，激活后
-        本来也会被清空，不会吞掉用户随后单独说出的指令。
-        """
-        target_seconds = target_seconds or _env_float(
-            "VOICE_ASSISTANT_KWS_VERIFICATION_MIN_SECONDS", 2.5
-        )
-        max_wait_seconds = max_wait_seconds or _env_float(
-            "VOICE_ASSISTANT_KWS_VERIFICATION_MAX_WAIT_SECONDS", 2.0
-        )
-        target_samples = max(1, int(self._asr_rate * target_seconds))
-        clean = list([] if samples is None else samples)
-        raw = list([] if speaker_samples is None else speaker_samples)
-        if len(clean) >= target_samples:
-            return clean[-target_samples:], raw[-target_samples:]
-
-        initial_len = len(clean)
-        deadline = time.monotonic() + max(0.0, max_wait_seconds)
-        while len(clean) < target_samples:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            try:
-                audio_data = self.audio_queue.get(timeout=min(0.1, remaining))
-            except queue.Empty:
-                continue
-            try:
-                verification_audio = self.verification_audio_queue.get_nowait()
-            except queue.Empty:
-                verification_audio = audio_data
-            clean.extend(
-                self._resample_for_asr(audio_data.reshape(-1)).tolist()
-            )
-            raw.extend(
-                self._resample_for_asr(verification_audio.reshape(-1)).tolist()
-            )
-
-        clean = clean[-target_samples:]
-        raw = raw[-target_samples:]
-        print(
-            "[KWS] 补齐活体/声纹验证窗口: "
-            f"{initial_len} -> {len(clean)} samples "
-            f"({len(clean) / self._asr_rate:.2f}s)"
-        )
-        return clean, raw
         try:
             while True:
                 self.verification_audio_queue.get_nowait()
@@ -2855,12 +2799,6 @@ class VoiceAssistant:
                                 wake_samples = _wake_verification_samples()
                                 speaker_wake_samples = (
                                     _wake_speaker_verification_samples()
-                                )
-                                wake_samples, speaker_wake_samples = (
-                                    self._collect_kws_verification_tail(
-                                        wake_samples,
-                                        speaker_wake_samples,
-                                    )
                                 )
                                 print(f"[声纹] 唤醒词检测成功，准备验证声纹 (样本长度: {len(wake_samples)})")
                                 is_verified = self._verify_speaker_on_wake(
@@ -3590,9 +3528,19 @@ class VoiceAssistant:
                     if has and idle >= _TTS_DEBOUNCE_SEC:
                         _flush_segment(force=True)
 
-            # 合成线程数按设备逻辑核数动态决定（不硬编码）：约半数核、至少 1，
-            # 兼顾并行加速与不过度抢占（合成为 CPU 密集，ONNX 内部亦用多线程）。
-            num_synth_workers = max(1, (os.cpu_count() or 2) // 2)
+            # 默认按设备逻辑核数动态决定；后端可声明自己的外层并发上限。
+            # JARVIS-V2 的 ONNX 单次推理本身已使用多线程，叠加多个句子并行
+            # 会造成 CPU 过度订阅，实测反而显著拉长每句延迟。
+            default_synth_workers = max(1, (os.cpu_count() or 2) // 2)
+            worker_hint = getattr(self.tts, "parallel_synthesis_workers", None)
+            try:
+                num_synth_workers = (
+                    max(1, int(worker_hint))
+                    if worker_hint is not None
+                    else default_synth_workers
+                )
+            except (TypeError, ValueError):
+                num_synth_workers = default_synth_workers
             synth_threads = [
                 threading.Thread(target=_synth_worker, daemon=True)
                 for _ in range(num_synth_workers)

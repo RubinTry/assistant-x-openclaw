@@ -46,6 +46,14 @@ _HISTORY_TURNS = 3  # 快速路由注入的近期对话轮数（含 FastRouter +
 _HISTORY_MSG_CHARS = 240
 _MEMORY_DIRECT_CHARS = 260
 
+_JARVIS_WAKE_ENGLISH_CONTRACT = (
+    "# Current-turn wake response contract\n"
+    "This current message is a bare Jarvis wake marker. Reply with exactly one "
+    "short, natural English greeting. Use English only for this response, with "
+    "no Chinese/CJK characters. This contract expires after this response and "
+    "must not affect later conversation."
+)
+
 _MEMORY_TRIGGERS = (
     "记得", "还记得", "上次", "之前", "以前", "刚才", "我的", "我喜欢", "我不喜欢",
     "我常", "我一般", "我的偏好", "我的习惯", "remember", "last time",
@@ -92,6 +100,14 @@ def _is_codex_provider(provider: str) -> bool:
     return (provider or "").strip().lower() == "openai-codex"
 
 
+def _is_bare_jarvis_wake(text: str, agent_id: str = "", agent_name: str = "") -> bool:
+    stripped = (text or "").strip()
+    if not (stripped.startswith("voice-assistant-wake-up-") and "\n" not in stripped):
+        return False
+    aid = (agent_id or "").strip().lower().replace("-", "_")
+    return aid == "jarvis" or (not aid and "jarvis" in (agent_name or "").lower())
+
+
 def _router_persona_rules(agent_name: str, persona: str, agent_id: str = "") -> str:
     """Return a short English persona control block.
 
@@ -117,10 +133,14 @@ def _router_persona_rules(agent_name: str, persona: str, agent_id: str = "") -> 
         )
     if aid == "jarvis" or (not aid and ("jarvis" in hay or "贾维斯" in hay)):
         return (
-            "You are Jarvis. Always reply in English, even when the user speaks "
-            "or writes in another language. Address the user as \"sir\" when "
-            "natural. Keep a calm, precise, composed assistant tone. Be concise "
-            "and natural for voice. Do not use markdown unless asked."
+            "You are Jarvis. Only a bare wake-up greeting is English-only. In all "
+            "other replies, use the user's language or the language requested. "
+            "Whenever speaking Chinese, use natural full Sichuan dialect in syntax, "
+            "wording, sentence endings, and rhythm—not standard Mandarin decorated "
+            "with an occasional particle. Keep technical facts and English terms exact, "
+            "and retain Jarvis's calm, precise, refined character. Address the user as "
+            "\"sir\" when natural. Be concise and suitable for voice. Do not use "
+            "markdown unless asked."
         )
     if name:
         return (
@@ -152,9 +172,10 @@ def _routing_system_prompt(agent_name: str, persona: str, agent_id: str = "") ->
         "as wake/time context and handle or hand off the instruction normally. Never "
         "discard the instruction in favor of a greeting. Do NOT mention the marker or "
         "the voice-assistant system.\n"
-        "When answering directly as Jarvis, reply in English only. Otherwise reply "
-        "in the configured character's required language. Keep it short and spoken, "
-        "no markdown, no lists."
+        "For a bare wake-up answered as Jarvis, the one-line greeting must be in "
+        "English. For every other direct reply, use the user's language or the "
+        "language they explicitly request. Jarvis must render every Chinese clause "
+        "in natural full Sichuan dialect. Keep it short and spoken, no markdown, no lists."
     )
 
 
@@ -197,6 +218,12 @@ class FastRouterClient:
         """English routing prompt + optional memory context."""
         parts = [_routing_system_prompt(self.agent_name, self.persona, self.agent_id)]
 
+        if _is_bare_jarvis_wake(text, self.agent_id, self.agent_name):
+            # Make the one-shot language rule explicit for the current request.
+            # Keeping it out of the persistent persona prevents English-only from
+            # leaking into the user's next conversational turn.
+            parts.append(_JARVIS_WAKE_ENGLISH_CONTRACT)
+
         hr = self.history_reader
         if hr is not None and _needs_memory_context(text):
             try:
@@ -231,6 +258,12 @@ class FastRouterClient:
         当场失忆。近期 N 轮 token 成本极小（每条截 _HISTORY_MSG_CHARS 字），
         换来连续性，值得。长期记忆检索仍走 _needs_memory_context 门控（更贵）。
         """
+        # A bare wake has no conversational content to resolve. Injecting the
+        # previous Chinese turns here can overpower the one-shot English greeting
+        # rule on smaller fast models, so isolate this single response from history.
+        if _is_bare_jarvis_wake(text, self.agent_id, self.agent_name):
+            return []
+
         msgs = []
         lanes = {"fast_router", "fast"}
         if self.engine:

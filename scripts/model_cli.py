@@ -5,8 +5,8 @@
 模型表 CLI —— Control Center 用它读写 model_table.json，**不依赖助手是否启动**。
 
 模型配置本就是"生成 model_table.json"的独立步骤，助手启动时再读它。因此这里
-走子进程（Control Center 用 venv Python 调本脚本），加解密仍在 Python 一侧完成，
-与助手主程序解耦：助手没跑也能配。
+走子进程（Control Center 用 venv Python 调本脚本），系统凭据库读写仍在 Python
+一侧完成，与助手主程序解耦：助手没跑也能配。
 
 用法（结果统一 JSON 打到 stdout；成功 exit 0，出错 exit 1 并打 {"error": ...}）：
   model_cli.py list
@@ -15,6 +15,7 @@
   model_cli.py delete      < payload.json     # {id}
   model_cli.py current     < payload.json     # {id}
   model_cli.py agent-current < payload.json   # {id}
+  model_cli.py migrate-credentials             # Fernet -> OS credential store
 
 含密文/明文 key 的入参一律走 stdin，避免出现在进程 argv（ps 可见）里。
 """
@@ -71,6 +72,9 @@ def main(argv) -> None:
         elif cmd == "agent-current":
             body = _read_stdin_json()
             _emit(model_store.set_agent_current((body.get("id") or "").strip()))
+
+        elif cmd == "migrate-credentials":
+            _emit(model_store.migrate_legacy_credentials())
 
         elif cmd == "validate":
             import model_probe

@@ -18,8 +18,8 @@
             "components": {
                 "feedback": "jarvis",
                 "visual": "jarvis",
-                "tts_comment": "tts 可选值:jarvis,macos_say",
-                "tts": "jarvis"
+                "tts_comment": "tts 可选值:jarvis,jarvis_v2_onnx,macos_say",
+                "tts": "jarvis_v2_onnx"
             },
             "keywords_file": "keywords/jarvis.txt",
             "asr_mode": "offline",
@@ -37,6 +37,16 @@
                         }
                     },
                     "speed": 1.2
+                },
+                "jarvis_v2_onnx_comment": "JARVIS-V2 中英混合 MeloTTS ONNX 候选；把 components.tts 改为 jarvis_v2_onnx 启用，不影响默认 jarvis。",
+                "jarvis_v2_onnx": {
+                    "model_dir": "models/jarvis-v2-melotts-onnx",
+                    "sample_rate": 44100,
+                    "speed": 1.0,
+                    "sdp_ratio": 0.2,
+                    "noise_scale": 0.6,
+                    "noise_scale_w": 0.7,
+                    "num_threads": 8
                 },
                 "macos_say": {
                     "voice": "Lee",

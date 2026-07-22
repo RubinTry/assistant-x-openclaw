@@ -8,12 +8,11 @@
   - 单一 JSON 文件存在项目根目录 model_table.json，只经本模块读写，
     用户不直接编辑——写入统一由 Control Center 通过后端 18790 端点触发。
   - provider 按 OpenAI 标准描述：base_url + model + api_key（走 /v1/chat/completions）。
-  - api_key 加密落盘（Fernet / AES-128-CBC + HMAC），用时才解密；
-    加解密全部在 Python 后端一侧完成，Control Center 只传明文到本地回环端口，
-    避免 Dart/Python 跨语言加密互通。
-  - master key 存在 data/.model_key（0600，gitignore），随机生成一次后长期复用。
+  - api_key 存入系统凭据库：macOS Keychain / Windows Credential Manager；
+    model_table.json 只保存 credential_id，不保存可离线解密的密文。
+  - 旧版 Fernet 密文会在系统凭据写入成功后原子迁移并从模型表删除。
   - 对外读取（供 UI 展示）一律掩码 api_key，绝不回传明文；
-    仅 get_current_decrypted() 在进程内为 LLM 调用解出明文。
+    get_current_decrypted()/get_decrypted() 仅在进程内为模型调用解出明文。
 
 表结构：
   {
@@ -26,7 +25,7 @@
         "provider": "deepseek",       # 展示用标签
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",
-        "api_key_enc": "<fernet token>",
+        "credential_id": "model:deepseek-chat",
         "created_at": "...", "updated_at": "..."
       }
     ]
@@ -41,6 +40,8 @@ import uuid
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet, InvalidToken
+
+import credential_store
 
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_TABLE_PATH = os.path.join(_PROJECT_DIR, "model_table.json")
@@ -157,14 +158,54 @@ def _save(data: dict) -> None:
 
 
 def _public_entry(entry: dict) -> dict:
-    """对外视图：不含 api_key_enc，api_key 字段给掩码串。"""
-    out = {k: v for k, v in entry.items() if k != "api_key_enc"}
-    try:
-        out["api_key"] = _mask(_decrypt(entry.get("api_key_enc", "")))
-    except (InvalidToken, ValueError, TypeError):
-        out["api_key"] = ""
-    out["api_key_set"] = bool(entry.get("api_key_enc"))
+    """对外视图：不含密文/凭据引用，api_key 只表示是否已配置。"""
+    out = {
+        k: v
+        for k, v in entry.items()
+        if k not in {"api_key_enc", "credential_id", "api_key_hint"}
+    }
+    hint = str(entry.get("api_key_hint") or "")[-4:]
+    out["api_key"] = ("•" * 12 + hint) if hint else ""
+    out["api_key_set"] = bool(
+        entry.get("credential_id") or entry.get("api_key_enc")
+    )
     return out
+
+
+def _read_entry_secret(entry: dict, *, migrate: bool) -> str | None:
+    account = entry.get("credential_id")
+    if account:
+        return credential_store.get_secret(account)
+    legacy = entry.get("api_key_enc")
+    if not legacy:
+        return None
+    secret = _decrypt(legacy)
+    if migrate:
+        account = credential_store.credential_id(entry.get("id"))
+        credential_store.set_secret(account, secret)
+        entry["credential_id"] = account
+        entry["api_key_hint"] = secret[-4:]
+        entry.pop("api_key_enc", None)
+    return secret
+
+
+def migrate_legacy_credentials() -> dict:
+    """Move every legacy Fernet API key into the OS credential store.
+
+    Each entry is removed from the model table only after the OS store accepts
+    it. A failed migration leaves that entry's legacy ciphertext untouched.
+    """
+    with _lock:
+        data = _load()
+        migrated = []
+        for entry in data.get("models", []):
+            if not entry.get("api_key_enc"):
+                continue
+            _read_entry_secret(entry, migrate=True)
+            migrated.append(entry.get("id"))
+        if migrated:
+            _save(data)
+        return {"migrated": migrated, "count": len(migrated)}
 
 
 # ── 对外 API ─────────────────────────────────────────────────────────
@@ -210,15 +251,15 @@ def upsert_model(entry: dict) -> dict:
         if not entry_id:
             entry_id = _unique_entry_id(_slug(label) or uuid.uuid4().hex[:8], models)
         existing = next((e for e in models if e.get("id") == entry_id), None)
-        source_api_key_enc = None
+        source_api_key = None
         if api_key_source_id:
             source = next((e for e in models if e.get("id") == api_key_source_id), None)
             if source is None:
                 raise ValueError("api_key_source_id 指向的模型不存在")
-            source_api_key_enc = source.get("api_key_enc")
+            source_api_key = _read_entry_secret(source, migrate=True)
 
         if existing is None:
-            if not api_key and not source_api_key_enc and not codex_provider:
+            if not api_key and not source_api_key and not codex_provider:
                 raise ValueError("新增模型必须提供 api_key")
             record = {
                 "id": entry_id,
@@ -229,10 +270,12 @@ def upsert_model(entry: dict) -> dict:
                 "created_at": _now(),
                 "updated_at": _now(),
             }
-            if api_key:
-                record["api_key_enc"] = _encrypt(str(api_key))
-            elif source_api_key_enc:
-                record["api_key_enc"] = source_api_key_enc
+            secret = str(api_key or source_api_key or "")
+            if secret:
+                account = credential_store.credential_id(entry_id)
+                credential_store.set_secret(account, secret)
+                record["credential_id"] = account
+                record["api_key_hint"] = secret[-4:]
             models.append(record)
         else:
             existing.update({
@@ -242,11 +285,18 @@ def upsert_model(entry: dict) -> dict:
                 "model": model,
                 "updated_at": _now(),
             })
-            # api_key 留空 = 保持原值不变；非空 = 重新加密覆盖
+            # api_key 留空 = 保持原值不变；非空 = 覆盖系统凭据库。
             if api_key:
-                existing["api_key_enc"] = _encrypt(str(api_key))
-            elif codex_provider:
+                account = existing.get("credential_id") or credential_store.credential_id(entry_id)
+                credential_store.set_secret(account, str(api_key))
+                existing["credential_id"] = account
+                existing["api_key_hint"] = str(api_key)[-4:]
                 existing.pop("api_key_enc", None)
+            elif codex_provider:
+                account = existing.pop("credential_id", None)
+                existing.pop("api_key_hint", None)
+                existing.pop("api_key_enc", None)
+                credential_store.delete_secret(account)
             record = existing
 
         # 首条自动设为 current
@@ -261,6 +311,7 @@ def upsert_model(entry: dict) -> dict:
 def delete_model(entry_id: str) -> dict:
     with _lock:
         data = _load()
+        deleted = next((e for e in data["models"] if e.get("id") == entry_id), None)
         before = len(data["models"])
         data["models"] = [e for e in data["models"] if e.get("id") != entry_id]
         if len(data["models"]) == before:
@@ -272,6 +323,8 @@ def delete_model(entry_id: str) -> dict:
             candidates = [e for e in data["models"] if not is_codex_provider(e.get("provider", ""))]
             data["agent_current"] = candidates[0]["id"] if candidates else None
         _save(data)
+        if deleted:
+            credential_store.delete_secret(deleted.get("credential_id"))
         return list_models()
 
 
@@ -312,20 +365,20 @@ def get_current_decrypted() -> dict | None:
         entry = next((e for e in data["models"] if e.get("id") == cur), None)
         if entry is None:
             return None
-        if is_codex_provider(entry.get("provider", "")):
-            api_key = ""
-        else:
-            try:
-                api_key = _decrypt(entry.get("api_key_enc", ""))
-            except (InvalidToken, ValueError, TypeError):
-                return None
+        was_legacy = bool(entry.get("api_key_enc"))
+        try:
+            api_key = "" if is_codex_provider(entry.get("provider", "")) else _read_entry_secret(entry, migrate=True)
+        except (InvalidToken, ValueError, TypeError, credential_store.CredentialStoreError):
+            return None
+        if was_legacy and entry.get("credential_id"):
+            _save(data)
         return {
             "id": entry.get("id"),
             "label": entry.get("label"),
             "provider": entry.get("provider"),
             "base_url": entry.get("base_url"),
             "model": entry.get("model"),
-            "api_key": api_key,
+            "api_key": api_key or "",
         }
 
 
@@ -348,20 +401,20 @@ def get_decrypted(entry_id: str) -> dict | None:
         entry = next((e for e in data["models"] if e.get("id") == entry_id), None)
         if entry is None:
             return None
-        if is_codex_provider(entry.get("provider", "")):
-            api_key = ""
-        else:
-            try:
-                api_key = _decrypt(entry.get("api_key_enc", ""))
-            except (InvalidToken, ValueError, TypeError):
-                return None
+        was_legacy = bool(entry.get("api_key_enc"))
+        try:
+            api_key = "" if is_codex_provider(entry.get("provider", "")) else _read_entry_secret(entry, migrate=True)
+        except (InvalidToken, ValueError, TypeError, credential_store.CredentialStoreError):
+            return None
+        if was_legacy and entry.get("credential_id"):
+            _save(data)
         return {
             "id": entry.get("id"),
             "label": entry.get("label"),
             "provider": entry.get("provider"),
             "base_url": entry.get("base_url"),
             "model": entry.get("model"),
-            "api_key": api_key,
+            "api_key": api_key or "",
         }
 
 

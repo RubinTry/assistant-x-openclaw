@@ -16,9 +16,16 @@ aec-audio-processing-fork==1.0.1.dev1; sys_platform == "win32"
 emoji>=2.0.0
 piper-tts>=1.0.0
 onnxruntime>=1.20.0
+# JARVIS-V2 MeloTTS ONNX：中英混合文本前处理与 multilingual BERT 特征
+transformers>=4.40.0
+torch>=2.4
+g2p-en>=2.1.0
+cn2an>=0.5.22
+pypinyin>=0.50.0
+jieba>=0.42.1
+num2words>=0.5.13
 # 金属感语音后处理用：自带跨平台静态 ffmpeg 二进制，免系统安装/PATH
 imageio-ffmpeg>=0.4.9
-
 # Edwin 内置屏幕读取：Pillow 截屏 + macOS Vision OCR，不依赖 Homebrew CLI
 pillow>=10.0.0
 pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
@@ -31,7 +38,9 @@ openai>=1.0.0
 requests>=2.28.0
 # Edwin Chrome CDP 与 OpenClaw WebSocket 桥（import websocket）
 websocket-client>=1.6.0
-# OpenClaw 设备签名及本地模型表凭据加密（Ed25519/Fernet）
+# OpenClaw 设备签名及旧版模型凭据迁移（Ed25519/Fernet）
 cryptography>=41.0.0
+# 模型 API Key：macOS Keychain / Windows Credential Manager
+keyring>=25.0.0
 # Edwin 跨平台只读系统健康/进程/磁盘/网络采集，避免依赖 top/df 等系统 CLI
 psutil>=5.9.0

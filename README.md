@@ -179,6 +179,48 @@ openclaw devices list
   - 万一两者都没有，**也不会报错**——自动回退纯 Piper 原声，仅在启动日志给一条提示。
   - 可选覆盖：设环境变量 `FFMPEG_BIN` 指向自定义 ffmpeg 可执行文件。
 
+### JARVIS-V2 MeloTTS ONNX（可选）
+
+项目新增了一个中英混合的 JARVIS-V2 MeloTTS 候选后端，模型由
+[201831771214/MeloTTS-ONNX](https://github.com/201831771214/MeloTTS-ONNX)
+从微调后的 PyTorch checkpoint 导出。它不会替换原有 Piper Jarvis，默认仍使用
+`components.tts: "jarvis"`。
+
+模型目录：
+
+```text
+models/jarvis-v2-melotts-onnx/
+├── model.onnx
+├── config.json
+└── bert-base-multilingual-uncased/
+    ├── config.json
+    ├── pytorch_model.bin
+    ├── tokenizer.json
+    ├── tokenizer_config.json
+    └── vocab.txt
+```
+
+启用方式：
+
+```jsonc
+"components": {
+    "feedback": "jarvis",
+    "visual": "jarvis",
+    "tts": "jarvis_v2_onnx"
+}
+```
+
+对应参数在 `assistants.json` 的 `tts_configs.jarvis_v2_onnx` 中：`speed`、
+`sample_rate`、`sdp_ratio`、`noise_scale`、`noise_scale_w` 和 `num_threads`。
+该后端会在初始化后于后台预载多语 BERT、ONNX 会话并完成一次预热推理；
+主程序只为它启用一个外层合成 worker，避免与 ONNX 内部线程池重复并发抢占 CPU。
+`sample_rate` 必须与模型配置一致（JARVIS-V2 为 44,100 Hz），启动时会校验模型
+采样率、配置采样率、`hop_length` 与声码器上采样倍率，任一不一致即拒绝加载，
+避免变速或音调错误。该后端固定使用
+`ZH_MIX_EN` 前处理，可直接合成中文、英文和中英混合文本；TTS 主模型走
+ONNX Runtime CPU，multilingual BERT 用于生成 768 维文本特征。切回
+`"tts": "jarvis"` 即恢复原模型。
+
 ## 项目亮点
 
 - **多角色切换**：内置贾维斯、林妹妹两个角色，独立唤醒词、话术风格、音效和视觉特效，随时切换体验
@@ -978,6 +1020,13 @@ assistant-x-openclaw/
 ├── .env                      # 环境变量
 └── requirements.txt          # Python 依赖
 ```
+
+---
+
+## 免责声明
+
+严禁用户利用本模型开展未经授权的语音克隆、声音仿冒、欺诈、诈骗及其他任何违法、违背公序良俗的行为。所有使用者均需严格遵守当地适用法律法规与道德规范。
+若出现任何不当使用本模型的行为，开发方不承担任何相关法律责任。我们倡导负责任的人工智能研发与使用，呼吁行业社群在人工智能的研究与落地应用中坚守安全底线、恪守伦理准则。
 
 ---
 

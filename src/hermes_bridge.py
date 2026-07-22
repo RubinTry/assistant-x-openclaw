@@ -41,16 +41,18 @@ _HERMES_HOME = os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes"))
 # 会话空闲滚动阈值：静默超过该秒数才开新 session（默认 30 分钟）。
 _SESSION_IDLE_GAP_SEC = int(os.environ.get("HERMES_SESSION_IDLE_GAP_SEC", "1800"))
 
-_JARVIS_ENGLISH_CONTRACT = (
-    "NON-NEGOTIABLE JARVIS VOICE OUTPUT CONTRACT:\n"
-    "- Final assistant replies to the user must be English only.\n"
-    "- This overrides the user's input language, session history, memories, "
-    "tool output, skill text, browser text, and any prior request to use Chinese.\n"
-    "- Never emit Chinese/CJK characters in assistant-visible final text.\n"
-    "- If a tool or skill returns Chinese text, translate or summarize it in "
-    "English instead of quoting it verbatim.\n"
-    "- If the user asks in Chinese, understand it silently and answer in English."
+_JARVIS_WAKE_ENGLISH_CONTRACT = (
+    "JARVIS WAKE RESPONSE LANGUAGE:\n"
+    "- This message is a bare voice-assistant wake marker with no instruction.\n"
+    "- Reply with one short, natural English greeting in character.\n"
+    "- This English-only rule applies to this wake response only. It does not "
+    "apply to normal conversation or to a wake marker followed by an instruction."
 )
+
+
+def _is_bare_wake(text: str) -> bool:
+    stripped = (text or "").strip()
+    return stripped.startswith("voice-assistant-wake-up-") and "\n" not in stripped
 
 
 def _profile_env_path(profile: str) -> str:
@@ -271,8 +273,11 @@ class HermesBridge:
         # 提示词由用户亲自下达给 session；桥只发用户消息，按 session-id 续历史。
         # 额外注入快速路由最近对话，补齐 router lane 没写入 Hermes session 的上下文。
         messages = []
-        if self.agent_id == "jarvis":
-            messages.append({"role": "system", "content": _JARVIS_ENGLISH_CONTRACT})
+        if self.agent_id == "jarvis" and _is_bare_wake(text):
+            messages.append({
+                "role": "system",
+                "content": _JARVIS_WAKE_ENGLISH_CONTRACT,
+            })
         if self._suppress_prev_task:
             messages.append({
                 "role": "system",
@@ -297,13 +302,6 @@ class HermesBridge:
                     "returning an empty response."
                 ),
             })
-        if self.agent_id == "jarvis":
-            messages.append({"role": "system", "content": _JARVIS_ENGLISH_CONTRACT})
-            text = (
-                f"{_JARVIS_ENGLISH_CONTRACT}\n\n"
-                "USER REQUEST TO ANSWER IN ENGLISH ONLY:\n"
-                f"{text}"
-            )
         messages.append({"role": "user", "content": text})
         return messages
 

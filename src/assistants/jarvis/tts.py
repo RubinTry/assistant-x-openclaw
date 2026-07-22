@@ -67,3 +67,35 @@ class ZipVoiceTTS(AssistantTTS):
         return tts_zipvoice.synthesize_streaming(
             text, stop_event=stop_event, volume=volume,
         )
+
+
+class JarvisV2OnnxTTS(AssistantTTS):
+    """Fine-tuned bilingual JARVIS-V2 MeloTTS model running in ONNX Runtime."""
+
+    # One outer synthesis worker lets ONNX use the CPU efficiently without
+    # multiplying its intra-op thread pool across several simultaneous sentences.
+    parallel_synthesis_workers = 1
+
+    def __init__(self, config: dict = None):
+        from assistants.jarvis import tts_melotts_onnx
+        tts_melotts_onnx.configure(config or {})
+        tts_melotts_onnx.preload()
+
+    def is_available(self) -> bool:
+        from assistants.jarvis import tts_melotts_onnx
+        return tts_melotts_onnx.is_available()
+
+    def synthesize(self, text: str, output_path: str = None, **kwargs):
+        from assistants.jarvis import tts_melotts_onnx
+        return tts_melotts_onnx.synthesize(text, output_path=output_path, **kwargs)
+
+    def synthesize_to_array(self, text: str, **kwargs):
+        from assistants.jarvis import tts_melotts_onnx
+        return tts_melotts_onnx.synthesize_to_array(text, **kwargs)
+
+    def synthesize_streaming(self, text: str, stop_event: Event = None,
+                             volume: float = 1.5) -> bool:
+        from assistants.jarvis import tts_melotts_onnx
+        return tts_melotts_onnx.synthesize_streaming(
+            text, stop_event=stop_event, volume=volume,
+        )
