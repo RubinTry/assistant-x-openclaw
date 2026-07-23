@@ -5,7 +5,7 @@
 #include "flutter_window.h"
 #include "utils.h"
 
-// 自定义标题栏：启用 bitsdojo 自定义边框，隐藏系统原生标题栏。
+// Custom title bar: enable the bitsdojo custom frame and hide the native frame.
 #include <bitsdojo_window_windows/bitsdojo_window_plugin.h>
 auto bdw = bitsdojo_window_configure(BDW_CUSTOM_FRAME | BDW_HIDE_ON_STARTUP);
 
