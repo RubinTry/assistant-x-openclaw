@@ -1,10 +1,118 @@
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../core/agent_visual.dart';
 import 'jarvis_rings_windows.dart';
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Shader-based J.A.R.V.I.S. effects (GPU-accelerated, single-pass)
+//
+//  Translates V1 ParticleWindow.swift → single GLSL fragment shader
+//  jarvis_core.frag renders in one pass:
+//    raymarched 3D core + rings + veils + all particle systems
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Widget that loads and renders the unified Jarvis fragment shader.
+class JarvisShaderEffects extends StatefulWidget {
+  final double time;
+  final int state;         // 0=idle,1=listening,2=thinking,3=speaking,4=executing
+  final double energy;     // 0.0–1.0 audio-driven
+  final double opacity;    // 0.0–1.0 fade
+  final double focusBoost; // 0.0 or 1.0
+  final double scale;      // animation scale (wake/hide)
+
+  const JarvisShaderEffects({
+    super.key,
+    required this.time,
+    required this.state,
+    required this.energy,
+    required this.opacity,
+    this.focusBoost = 0.0,
+    this.scale = 1.0,
+  });
+
+  @override
+  State<JarvisShaderEffects> createState() => _JarvisShaderEffectsState();
+}
+
+class _JarvisShaderEffectsState extends State<JarvisShaderEffects> {
+  ui.FragmentProgram? _program;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadShader();
+  }
+
+  Future<void> _loadShader() async {
+    try {
+      final prog = await ui.FragmentProgram.fromAsset(
+        'shaders/jarvis_core.frag',
+      );
+      if (mounted) setState(() => _program = prog);
+    } catch (e) {
+      debugPrint('⚠️ Failed to load jarvis_core.frag: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_program == null) return const SizedBox.expand();
+
+    return CustomPaint(
+      painter: _JarvisShaderPainter(
+        program: _program!,
+        time: widget.time,
+        state: widget.state,
+        energy: widget.energy,
+        opacity: widget.opacity,
+        focusBoost: widget.focusBoost,
+      ),
+    );
+  }
+}
+
+/// Single-pass painter: binds uniforms to jarvis_core.frag
+class _JarvisShaderPainter extends CustomPainter {
+  final ui.FragmentProgram program;
+  final double time, energy, opacity, focusBoost;
+  final int state;
+
+  _JarvisShaderPainter({
+    required this.program,
+    required this.time,
+    required this.state,
+    required this.energy,
+    required this.opacity,
+    required this.focusBoost,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final shader = program.fragmentShader();
+    // uniform layout matches jarvis_core.frag:
+    // loc0=uTime, loc1+2=uResolution(vec2), loc3=uState, loc4=uEnergy, loc5=uOpacity, loc6=uFocusBoost
+    shader.setFloat(0, time);
+    shader.setFloat(1, size.width);
+    shader.setFloat(2, size.height);
+    shader.setInt(3, state);
+    shader.setFloat(4, energy);
+    shader.setFloat(5, opacity);
+    shader.setFloat(6, focusBoost);
+
+    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+  }
+
+  @override
+  bool shouldRepaint(covariant _JarvisShaderPainter oldDelegate) => true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Original Canvas-based renderers (kept for reference)
+// ═══════════════════════════════════════════════════════════════════════
 
 class JarvisRingsPainter extends CustomPainter {
   final double outerRingRotation;
@@ -446,6 +554,7 @@ class JarvisAgentVisual implements AgentVisual {
   late AnimationController _leftTerminalSlideController;
   late AnimationController _rightTerminalSlideController;
   late AnimationController _toolCallTerminalSlideController;
+  late AnimationController _timeController; // drives shader uTime
 
   static const Color _jarvisBlue = Color(0xFF66FFFF);
   static const Color _terminalBackground = Color(0xFF0CDDFF);
@@ -513,6 +622,12 @@ class JarvisAgentVisual implements AgentVisual {
       duration: const Duration(milliseconds: 500),
       value: 0.0,
     );
+
+    // Unbounded time controller for shader uTime (matches LinMeimei pattern)
+    _timeController = AnimationController.unbounded(
+      vsync: vsync,
+      duration: const Duration(days: 365),
+    )..animateTo(const Duration(days: 365).inSeconds.toDouble());
 
     _outerRingController.repeat();
     _arcsController.repeat();
@@ -742,6 +857,7 @@ class JarvisAgentVisual implements AgentVisual {
     _dataRingController.dispose();
     _innerRingController.dispose();
     _pulseController.dispose();
+    _timeController.dispose();
   }
 
   @override
@@ -894,13 +1010,47 @@ class JarvisAgentVisual implements AgentVisual {
     );
   }
 
+  // ── State → shader state index ──────────────────────────────────
+  int get _shaderState {
+    switch (_currentEffect) {
+      case 'wake':
+      case 'idle':
+        return 0;
+      case 'user_text':
+        return 1; // listening
+      case 'creating_session':
+      case 'session_created':
+      case 'processing':
+        return 2; // thinking
+      case 'ai_text':
+        return 3; // speaking
+      case 'success':
+      case 'error':
+        return 4; // executing
+      default:
+        return 0;
+    }
+  }
+
+  // ── Energy level for shader ─────────────────────────────────────
+  double get _shaderEnergy {
+    // Combine audio visual energy with animation state
+    double e = 0.04; // base idle
+    if (_isSpeaking) e = 0.55 + _pulseController.value * 0.25;
+    if (_currentEffect == 'user_text') e = 0.6 + _pulseController.value * 0.2;
+    if (_currentEffect == 'creating_session' || _currentEffect == 'processing') e = 0.25;
+    if (_currentEffect == 'ai_text') e = 0.45 + _pulseController.value * 0.3;
+    if (_currentEffect == 'success' || _currentEffect == 'error') e = 0.5;
+    return e;
+  }
+
   @override
   Widget buildEffects(
       BuildContext context,
       double screenWidth,
       double screenHeight,
       ) {
-    final size = 300.0;
+    final size = screenWidth < screenHeight ? screenWidth : screenHeight;
 
     return Center(
       child: AnimatedBuilder(
@@ -913,53 +1063,24 @@ class JarvisAgentVisual implements AgentVisual {
               builder: (context, child) {
                 return Transform.scale(
                   scale: _ringScaleController.value,
-                  child: AnimatedBuilder(
-                    animation: _pulseController,
-                    builder: (context, child) {
-                      return SizedBox(
-                        width: size,
-                        height: size,
-                        child: CustomPaint(
-                          painter: Platform.isWindows
-                              ? JarvisRingsPainterWindows(
-                            outerRingRotation:
-                            (_outerRingAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            arcsRotation:
-                            (_arcsAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            dataRingRotation:
-                            (_dataRingAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            innerRingRotation:
-                            (_innerRingAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            pulseValue: _pulseController.value,
-                            currentEffect: _currentEffect,
-                            speakingScale:
-                            (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
-                          )
-                              : JarvisRingsPainter(
-                            outerRingRotation:
-                            (_outerRingAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            arcsRotation:
-                            (_arcsAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            dataRingRotation:
-                            (_dataRingAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            innerRingRotation:
-                            (_innerRingAngle * 2 * math.pi) %
-                                (2 * math.pi),
-                            pulseValue: _pulseController.value,
-                            currentEffect: _currentEffect,
-                            speakingScale:
-                            (_ringScaleController.value - 1.0).clamp(0.0, 0.1) * 10,
-                          ),
-                        ),
-                      );
-                    },
+                  child: SizedBox(
+                    width: size,
+                    height: size,
+                    child: AnimatedBuilder(
+                      animation: _pulseController,
+                      builder: (context, child) {
+                        return JarvisShaderEffects(
+                          time: _timeController != null
+                              ? _timeController!.value
+                              : DateTime.now().millisecondsSinceEpoch / 1000.0,
+                          state: _shaderState,
+                          energy: _shaderEnergy,
+                          opacity: _ringOpacityController.value,
+                          focusBoost: _currentEffect == 'hide' ? 0.0 : 0.0,
+                          scale: _ringScaleController.value,
+                        );
+                      },
+                    ),
                   ),
                 );
               },
