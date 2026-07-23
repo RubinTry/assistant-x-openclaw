@@ -26,6 +26,9 @@ class MainFlutterWindow: NSWindow {
         self.titleVisibility = .hidden
 
         RegisterGeneratedPlugins(registry: flutterViewController)
+        M3VideoBridgePlugin.register(
+            with: flutterViewController.registrar(forPlugin: "M3VideoBridgePlugin")
+        )
 
         screenParametersObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,

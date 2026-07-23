@@ -144,7 +144,9 @@ class AssistantInstance:
         if spec == "jarvis":
             from assistants.jarvis.visual import JarvisVisual
 
-            visual = JarvisVisual()
+            visual = JarvisVisual(
+                effect_name=self.config.get("visualEffect", "Particle")
+            )
             visual.start()
             return visual
 

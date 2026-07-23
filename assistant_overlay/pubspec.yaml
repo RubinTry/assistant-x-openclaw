@@ -25,6 +25,15 @@ dependencies:
   battery_plus: ^7.0.0
   connectivity_plus: ^7.1.1
   network_info_plus: ^8.1.0
+  ffi: ^2.2.0
+  build: ^4.0.3
+  flutter_angle: ^0.4.1
+  http: ^1.6.0
+  image: ^4.9.1
+  vector_math: ^2.2.0
+  web: ^1.1.1
+  video_player: ^2.11.1
+  plugin_platform_interface: ^2.0.2
 
 dev_dependencies:
   flutter_test:
@@ -59,13 +68,20 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/jarvis/
-    - assets/ironman/
+    - assets/iron-man_mark_7.glb
     - assets/ico-jarvis.png
+    - assets/vendor/macbear_3d/fonts/RobotoMono/
 
   shaders:
     - shaders/metaballs_shader.frag
     - shaders/orb_shader.frag
+    - shaders/gravitational_light_orb.frag
 #    - shaders/siri_loader.frag
+
+  fonts:
+    - family: RobotoMono
+      fonts:
+        - asset: assets/vendor/macbear_3d/fonts/RobotoMono/RobotoMono-Regular.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

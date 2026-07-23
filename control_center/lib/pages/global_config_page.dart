@@ -50,9 +50,9 @@ class _GlobalConfigPageState extends State<GlobalConfigPage> {
     try {
       await _service.save(config);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('全局配置已写入 .env，重启语音助手后生效')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('配置已写入 .env 与 assistants.json，重启语音助手后生效')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -123,6 +123,16 @@ class _GlobalConfigPageState extends State<GlobalConfigPage> {
       children: [
         _intro(),
         const SizedBox(height: 14),
+        _section(
+          icon: Icons.auto_awesome_outlined,
+          title: '助手特效',
+          subtitle: '为每个 Assistant 选择唤醒后显示的视觉效果。',
+          children: [
+            for (int index = 0; index < config.assistantEffects.length; index++)
+              _assistantEffectSelector(config, index),
+          ],
+        ),
+        const SizedBox(height: 12),
         _section(
           icon: Icons.graphic_eq,
           title: '声纹验证',
@@ -208,7 +218,7 @@ class _GlobalConfigPageState extends State<GlobalConfigPage> {
           SizedBox(width: 12),
           Expanded(
             child: Text(
-              '配置会写入项目根目录 .env；运行中的语音助手需要重启后读取新值。',
+              '配置会写入项目根目录 .env 与 assistants.json；运行中的语音助手需要重启后读取新值。',
               style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
             ),
           ),
@@ -289,6 +299,44 @@ class _GlobalConfigPageState extends State<GlobalConfigPage> {
       activeThumbColor: AppColors.accent,
       activeTrackColor: AppColors.accent.withValues(alpha: 0.35),
       onChanged: onChanged,
+    );
+  }
+
+  Widget _assistantEffectSelector(GlobalConfig config, int index) {
+    final assistant = config.assistantEffects[index];
+    final options = assistant.id == 'jarvis'
+        ? const ['Particle', 'Gravitational']
+        : <String>{'Particle', assistant.visualEffect}.toList();
+    final selected = options.contains(assistant.visualEffect)
+        ? assistant.visualEffect
+        : options.first;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: index == config.assistantEffects.length - 1 ? 0 : 12,
+      ),
+      child: DropdownButtonFormField<String>(
+        initialValue: selected,
+        decoration: InputDecoration(
+          labelText: assistant.name,
+          helperText: assistant.id,
+          prefixIcon: const Icon(Icons.blur_circular_outlined),
+        ),
+        items: options
+            .map(
+              (effect) =>
+                  DropdownMenuItem<String>(value: effect, child: Text(effect)),
+            )
+            .toList(),
+        onChanged: (effect) {
+          if (effect == null) return;
+          final updated = List<AssistantEffectConfig>.from(
+            config.assistantEffects,
+          );
+          updated[index] = assistant.copyWith(visualEffect: effect);
+          _update(config.copyWith(assistantEffects: updated));
+        },
+      ),
     );
   }
 

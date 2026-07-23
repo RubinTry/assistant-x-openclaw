@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 class ConfigService {
@@ -14,8 +15,15 @@ class ConfigService {
   File get _envFile =>
       File(Platform.isWindows ? '$_projectDir\\.env' : '$_projectDir/.env');
 
+  File get _assistantsFile => File(
+    Platform.isWindows
+        ? '$_projectDir\\assistants.json'
+        : '$_projectDir/assistants.json',
+  );
+
   Future<GlobalConfig> load() async {
     final values = await _readValues();
+    final assistantEffects = await _readAssistantEffects();
     return GlobalConfig(
       speakerThreshold: _asDouble(
         values['VOICE_ASSISTANT_SPEAKER_THRESHOLD'],
@@ -41,6 +49,7 @@ class ConfigService {
         values['VOICE_ASSISTANT_MEDIA_WAKE_GUARD_ENFORCE'],
         false,
       ),
+      assistantEffects: assistantEffects,
     );
   }
 
@@ -96,6 +105,49 @@ class ConfigService {
     }
 
     await file.writeAsString('${next.join('\n')}\n');
+    await _saveAssistantEffects(config.assistantEffects);
+  }
+
+  Future<List<AssistantEffectConfig>> _readAssistantEffects() async {
+    final file = _assistantsFile;
+    if (!await file.exists()) return const [];
+    final root = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    final assistants = root['assistants'] as List<dynamic>? ?? const [];
+    return assistants
+        .map((raw) {
+          final assistant = raw as Map<String, dynamic>;
+          return AssistantEffectConfig(
+            id: assistant['id']?.toString() ?? '',
+            name:
+                assistant['name']?.toString() ??
+                assistant['id']?.toString() ??
+                '',
+            visualEffect: assistant['visualEffect']?.toString() ?? 'Particle',
+          );
+        })
+        .where((assistant) => assistant.id.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> _saveAssistantEffects(
+    List<AssistantEffectConfig> effects,
+  ) async {
+    final file = _assistantsFile;
+    if (!await file.exists()) return;
+    final root = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    final assistants = root['assistants'] as List<dynamic>? ?? const [];
+    final selected = {
+      for (final effect in effects) effect.id: effect.visualEffect,
+    };
+    for (final raw in assistants) {
+      final assistant = raw as Map<String, dynamic>;
+      final id = assistant['id']?.toString();
+      if (id != null && selected.containsKey(id)) {
+        assistant['visualEffect'] = selected[id];
+      }
+    }
+    const encoder = JsonEncoder.withIndent('    ');
+    await file.writeAsString('${encoder.convert(root)}\n');
   }
 
   Future<Map<String, String>> _readValues() async {
@@ -142,6 +194,7 @@ class GlobalConfig {
   final double livenessThreshold;
   final bool mediaWakeGuardEnabled;
   final bool mediaWakeGuardEnforce;
+  final List<AssistantEffectConfig> assistantEffects;
 
   const GlobalConfig({
     required this.speakerThreshold,
@@ -150,6 +203,7 @@ class GlobalConfig {
     required this.livenessThreshold,
     required this.mediaWakeGuardEnabled,
     required this.mediaWakeGuardEnforce,
+    required this.assistantEffects,
   });
 
   GlobalConfig copyWith({
@@ -159,6 +213,7 @@ class GlobalConfig {
     double? livenessThreshold,
     bool? mediaWakeGuardEnabled,
     bool? mediaWakeGuardEnforce,
+    List<AssistantEffectConfig>? assistantEffects,
   }) {
     return GlobalConfig(
       speakerThreshold: speakerThreshold ?? this.speakerThreshold,
@@ -169,6 +224,27 @@ class GlobalConfig {
           mediaWakeGuardEnabled ?? this.mediaWakeGuardEnabled,
       mediaWakeGuardEnforce:
           mediaWakeGuardEnforce ?? this.mediaWakeGuardEnforce,
+      assistantEffects: assistantEffects ?? this.assistantEffects,
+    );
+  }
+}
+
+class AssistantEffectConfig {
+  final String id;
+  final String name;
+  final String visualEffect;
+
+  const AssistantEffectConfig({
+    required this.id,
+    required this.name,
+    required this.visualEffect,
+  });
+
+  AssistantEffectConfig copyWith({String? visualEffect}) {
+    return AssistantEffectConfig(
+      id: id,
+      name: name,
+      visualEffect: visualEffect ?? this.visualEffect,
     );
   }
 }

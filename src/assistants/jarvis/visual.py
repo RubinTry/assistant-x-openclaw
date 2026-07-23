@@ -11,9 +11,19 @@ logger = logging.getLogger(__name__)
 class JarvisVisual(AssistantVisual):
     """贾维斯特效 — 通过 TCP 控制 Flutter overlay（JARVIS 风格环形动画 + 终端）"""
 
-    def __init__(self, host="127.0.0.1", port=17889):
+    def __init__(
+        self,
+        host="127.0.0.1",
+        port=17889,
+        effect_name="Particle",
+    ):
         self.host = host
         self.port = port
+        self.effect_name = (
+            effect_name
+            if effect_name in {"Particle", "Gravitational"}
+            else "Particle"
+        )
         self.socket = None
         self.lock = threading.Lock()
         self.connected = False
@@ -89,6 +99,7 @@ class JarvisVisual(AssistantVisual):
         """唤醒特效 — 先切换 agent，再唤醒"""
         # 先发送 agent 切换命令
         self.send("agent:jarvis")
+        self.send(f"visual_effect:{self.effect_name}")
         # 然后发送唤醒
         self.send("wake")
 

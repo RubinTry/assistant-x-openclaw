@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   flutter_acrylic
+  flutter_angle
   screen_retriever_linux
   window_manager
 )

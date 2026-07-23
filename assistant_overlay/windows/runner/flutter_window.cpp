@@ -3,6 +3,7 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "m3_video_bridge/m3_video_bridge_plugin.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
         : project_(project) {}
@@ -44,6 +45,9 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  macbear_3d::M3VideoBridgePlugin::RegisterWithRegistrar(
+      flutter_controller_->engine()->GetRegistrarForPlugin(
+          "M3VideoBridgePlugin"));
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

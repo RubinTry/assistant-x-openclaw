@@ -11,6 +11,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'agent_visual.dart';
 import 'hud_terminal_shell.dart';
+import 'overlay/jarvis/widgets/gravitational_light_orb.dart';
+import 'overlay/jarvis/widgets/iron_man_model_view.dart';
 
 class JarvisRingsPainter extends CustomPainter {
   final double outerRingRotation;
@@ -432,6 +434,7 @@ class JarvisAgentVisual implements AgentVisual {
   final double _jarvisRingSize = 240;
 
   String _currentEffect = 'idle';
+  String _visualEffect = 'Gravitational';
   bool _isSpeaking = false; // 标记用户是否正在说话
 
   // 终端消息数据
@@ -457,7 +460,6 @@ class JarvisAgentVisual implements AgentVisual {
   late AnimationController _terminalSlideController;
   late AnimationController _leftTerminalSlideController;
   late AnimationController _rightTerminalSlideController;
-
 
   void _initAnimationControllers() {
     _outerRingController = AnimationController(
@@ -526,6 +528,13 @@ class JarvisAgentVisual implements AgentVisual {
   @override
   void handleCommand(String command) {
     print('Received command: $command');
+    if (command.startsWith('visual_effect:')) {
+      final requested = command.substring('visual_effect:'.length).trim();
+      _visualEffect = requested == 'Gravitational'
+          ? 'Gravitational'
+          : 'Particle';
+      return;
+    }
     // hide动画进行中，只响应wake命令
     if (_isHiding && command != 'wake') {
       print('Ignoring command during hide animation: $command');
@@ -844,11 +853,24 @@ class JarvisAgentVisual implements AgentVisual {
                       return SizedBox(
                         width: size,
                         height: size,
-                        child: JarvisSequencePlayer(
-                          assetDir: 'assets/jarvis', // 只需要指定目录
-                          assetSuffix: '.png',
-                          fps: 30,
-                        ),
+                        // child: JarvisSequencePlayer(
+                        //   assetDir: 'assets/jarvis', // 只需要指定目录
+                        //   assetSuffix: '.png',
+                        //   fps: 30,
+                        // ),
+                        child: _visualEffect == 'Gravitational'
+                            ? const GravitationalLightOrb(
+                                coreColor: Color(0xFFBFE7FF),
+                                glowColor: Color(0xFF0D67BC),
+                                accentColor: Color(0xFF8CC1FA),
+                                mistColor: Color(0xFF0A4F91),
+                                orbScale: 1.2,
+                              )
+                            : JarvisSequencePlayer(
+                                assetDir: 'assets/jarvis',
+                                assetSuffix: '.png',
+                                fps: 30,
+                              ),
                       );
                     },
                   ),
@@ -888,7 +910,10 @@ class JarvisAgentVisual implements AgentVisual {
             padding: const EdgeInsets.only(top: 2),
             child: Text(
               time,
-              style: TextStyle(color: Color(0xFF8CC1FA).withAlpha(150), fontSize: 11),
+              style: TextStyle(
+                color: Color(0xFF8CC1FA).withAlpha(150),
+                fontSize: 11,
+              ),
             ),
           ),
         ],
@@ -937,7 +962,7 @@ class JarvisAgentVisual implements AgentVisual {
       showStatusDot: true,
       width: screenWidth / 6,
       maxHeight: maxHeight,
-      child: ListView( 
+      child: ListView(
         controller: scrollController,
         shrinkWrap: true,
         reverse: false,
@@ -1044,13 +1069,15 @@ class JarvisAgentVisual implements AgentVisual {
           // 显隐跟随 _ringOpacityController，与环形/序列帧等特效一致
           AnimatedBuilder(
             animation: _ringOpacityController,
-            builder: (context, child) => Opacity(
-              opacity: _ringOpacityController.value,
-              child: child,
-            ),
+            builder: (context, child) =>
+                Opacity(opacity: _ringOpacityController.value, child: child),
             child: HudTerminalShell(
               title: 'SYSTEM STATUS',
-              titleIcon: Image.asset("assets/ico-jarvis.png", width: 14, height: 14),
+              titleIcon: Image.asset(
+                "assets/ico-jarvis.png",
+                width: 14,
+                height: 14,
+              ),
               width: screenWidth / 6,
               maxHeight: double.infinity,
               child: const _SystemStatusPanel(),
@@ -1070,10 +1097,23 @@ class JarvisAgentVisual implements AgentVisual {
                         return SizedBox(
                           width: terminalHeight / 3 * 2,
                           height: terminalHeight / 3 * 2,
-                          child: JarvisSequencePlayer(
-                            assetDir: 'assets/ironman', // 只需要指定目录
-                            assetSuffix: '.png',
-                            fps: 30,
+                          child: ClipRect(
+                            child: IronManModelView(
+                              style: IronManModelStyle(
+                                palette: [
+                                  Color(0xFF0D67BC),
+                                  Color(0xFF8CC1FA),
+                                  Color(0xFFBFE7FF),
+                                  Color(0xFF6EB9FF),
+                                  Color(0xFF0A4F91),
+                                ],
+                                opacity: 0.62,
+                                glowColor: Color(0xFF79D9FF),
+                                glowIntensity: 0.24,
+                                glowScale: 1.045,
+                                spinSpeed: 0.628,
+                              ),
+                            ),
                           ),
                         );
                       },
@@ -1269,8 +1309,9 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
   final ValueNotifier<_Metric> _storN = ValueNotifier(const _Metric(0, []));
   final ValueNotifier<_Metric> _cpufN = ValueNotifier(const _Metric(0, []));
   final ValueNotifier<_Metric> _batN = ValueNotifier(const _Metric(0, []));
-  final ValueNotifier<_Net> _netN =
-      ValueNotifier(const _Net(Icons.help_outline, '—', ''));
+  final ValueNotifier<_Net> _netN = ValueNotifier(
+    const _Net(Icons.help_outline, '—', ''),
+  );
 
   final List<double> _memHist = [];
   final List<double> _storHist = [];
@@ -1382,12 +1423,17 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     _push(_storHist, stor);
     _push(_cpufHist, cpuf);
     _push(_batHist, bat.toDouble());
-    _memN.value =
-        _Metric(mem, List<double>.from(_memHist), detail: memDetail);
-    _storN.value =
-        _Metric(stor, List<double>.from(_storHist), detail: storDetail);
-    _cpufN.value =
-        _Metric(cpuf, List<double>.from(_cpufHist), detail: cpuDetail);
+    _memN.value = _Metric(mem, List<double>.from(_memHist), detail: memDetail);
+    _storN.value = _Metric(
+      stor,
+      List<double>.from(_storHist),
+      detail: storDetail,
+    );
+    _cpufN.value = _Metric(
+      cpuf,
+      List<double>.from(_cpufHist),
+      detail: cpuDetail,
+    );
     _batN.value = _Metric(
       bat.toDouble(),
       List<double>.from(_batHist),
@@ -1429,21 +1475,26 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
   /// 活动监视器“已使用内存”口径 = App Memory + Wired + Compressed。
   Future<List<int>?> _macMem() async {
     final total =
-        int.tryParse((await Process.run('sysctl', ['-n', 'hw.memsize'])).stdout
-                .toString()
-                .trim()) ??
-            0;
+        int.tryParse(
+          (await Process.run('sysctl', [
+            '-n',
+            'hw.memsize',
+          ])).stdout.toString().trim(),
+        ) ??
+        0;
     if (total <= 0) return null;
     final vm = await Process.run('vm_stat', []);
     final out = vm.stdout.toString();
-    final pageSize = int.tryParse(
-            RegExp(r'page size of (\d+) bytes').firstMatch(out)?.group(1) ??
-                '') ??
+    final pageSize =
+        int.tryParse(
+          RegExp(r'page size of (\d+) bytes').firstMatch(out)?.group(1) ?? '',
+        ) ??
         4096;
     int pages(String key) {
       final m = RegExp('$key:\\s+(\\d+)').firstMatch(out);
       return m != null ? int.parse(m.group(1)!) : 0;
     }
+
     final anonymous = pages('Anonymous pages');
     final purgeable = pages('Pages purgeable');
     final wired = pages('Pages wired down');
@@ -1471,9 +1522,14 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
   /// coreCount 从 system_info2 取（唯一 macOS 上可用的 API）。
   Future<List<int>?> _macCpu() async {
     try {
-      final top = await Process.run(
-        'top', ['-l', '1', '-n', '0', '-stats', 'cpu'],
-      );
+      final top = await Process.run('top', [
+        '-l',
+        '1',
+        '-n',
+        '0',
+        '-stats',
+        'cpu',
+      ]);
       // top 输出格式：CPU usage: 45.55% user, 15.46% sys, 38.98% idle
       final m = RegExp(
         r'CPU usage:\s+([\d.]+)%\s+user,\s+([\d.]+)%\s+sys',
@@ -1496,7 +1552,7 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
     try {
       final r = await Process.run('bash', [
         '-c',
-        r'''i=$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}'); netstat -ibn 2>/dev/null | awk -v i="$i" '$1==i && $3 ~ /Link/ {print $7" "$10; exit}' '''
+        r'''i=$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}'); netstat -ibn 2>/dev/null | awk -v i="$i" '$1==i && $3 ~ /Link/ {print $7" "$10; exit}' ''',
       ]);
       final parts = (r.stdout as String).trim().split(RegExp(r'\s+'));
       if (parts.length >= 2) {
@@ -1509,12 +1565,10 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
   }
 
   /// 字节 → 十进制 GB（存储，与 Finder 对齐）。
-  static String _fmtGB(num bytes) =>
-      (bytes / 1000000000).toStringAsFixed(1);
+  static String _fmtGB(num bytes) => (bytes / 1000000000).toStringAsFixed(1);
 
   /// 字节 → 二进制 GiB（内存，与活动监视器对齐）。
-  static String _fmtGiB(num bytes) =>
-      (bytes / 1073741824).toStringAsFixed(1);
+  static String _fmtGiB(num bytes) => (bytes / 1073741824).toStringAsFixed(1);
 
   static String _fmtRate(double kbs) {
     if (kbs >= 1024) return '${(kbs / 1024).toStringAsFixed(1)} MB/s';
@@ -1656,30 +1710,22 @@ class _SystemStatusPanelState extends State<_SystemStatusPanel> {
               valueListenable: _memN,
               builder: (_, m, __) => _gaugeRow('MEMORY', m),
             ),
-            SizedBox(
-              height: space,
-            ),
+            SizedBox(height: space),
             ValueListenableBuilder<_Metric>(
               valueListenable: _storN,
               builder: (_, m, __) => _gaugeRow('STORAGE', m),
             ),
-            SizedBox(
-              height: space,
-            ),
+            SizedBox(height: space),
             ValueListenableBuilder<_Metric>(
               valueListenable: _cpufN,
               builder: (_, m, __) => _gaugeRow('CPU', m),
             ),
-            SizedBox(
-              height: space,
-            ),
+            SizedBox(height: space),
             ValueListenableBuilder<_Metric>(
               valueListenable: _batN,
               builder: (_, m, __) => _gaugeRow('BATTERY', m),
             ),
-            SizedBox(
-              height: space,
-            ),
+            SizedBox(height: space),
             ValueListenableBuilder<_Net>(
               valueListenable: _netN,
               builder: (_, n, __) => _netRow(n),

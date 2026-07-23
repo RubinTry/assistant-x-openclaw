@@ -6,7 +6,7 @@
     "kwsMode_comment": "唤醒方式：true 使用传统 KWS 模型直接检测唤醒词；false 使用待机持续 ASR + KWS 辅助确认的新唤醒方式。修改后需重启语音助手。",
     "kwsMode": true,
     "default": "jarvis",
-    "overlay_debug_mode": false,
+    "overlay_debug_mode": true,
     "dock_autohide_on_wake_comment": "true 时助手激活期自动隐藏系统 Dock，退回待机还原（仅 macOS）",
     "dock_autohide_on_wake": false,
     "assistants": [
@@ -15,6 +15,7 @@
             "name": "贾维斯",
             "enabled": true,
             "visual": "jarvis",
+            "visualEffect": "Gravitational",
             "components": {
                 "feedback": "jarvis",
                 "visual": "jarvis",
@@ -266,6 +267,7 @@
             "name": "林妹妹",
             "enabled": true,
             "visual": "jarvis",
+            "visualEffect": "Light ball",
             "components": {
                 "feedback": "custom",
                 "visual": "custom",
