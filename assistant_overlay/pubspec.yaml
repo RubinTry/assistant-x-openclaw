@@ -76,6 +76,7 @@ flutter:
     - shaders/metaballs_shader.frag
     - shaders/orb_shader.frag
     - shaders/gravitational_light_orb.frag
+    - shaders/jarvis_rings.frag
 #    - shaders/siri_loader.frag
 
   fonts:

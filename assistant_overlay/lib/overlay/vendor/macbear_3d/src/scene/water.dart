@@ -181,7 +181,12 @@ class M3Water extends M3Entity {
     if (fillMode == .solid) {
       RenderingContext gl = M3AppEngine.instance.renderEngine.gl;
       gl.enable(WebGL.BLEND);
-      gl.blendFunc(WebGL.SRC_ALPHA, WebGL.ONE_MINUS_SRC_ALPHA); // alpha blending
+      gl.blendFuncSeparate(
+        WebGL.SRC_ALPHA,
+        WebGL.ONE_MINUS_SRC_ALPHA,
+        WebGL.ONE,
+        WebGL.ONE_MINUS_SRC_ALPHA,
+      );
       gl.depthMask(false); // Don't write to depth buffer in blending pass
       gl.disable(WebGL.CULL_FACE);
 

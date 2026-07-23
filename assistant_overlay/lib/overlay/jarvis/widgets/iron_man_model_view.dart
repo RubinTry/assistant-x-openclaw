@@ -150,7 +150,9 @@ class IronManModelScene extends M3Scene {
       final material = mesh.subMeshes[i].mtr;
       final color = style.colorAt(i);
       material.diffuse.setFrom(color);
-      material.diffuseTexture = M3Texture.createSolidColor(color);
+      material.diffuseTexture = M3Texture.createSolidColor(
+        Vector4(color.x, color.y, color.z, 1.0),
+      );
       material.alphaMode = M3AlphaMode.blend;
       material.specular.setValues(0.75, 0.9, 1.0);
       material.shininess = 96;
@@ -165,7 +167,9 @@ class IronManModelScene extends M3Scene {
     for (var i = 0; i < mesh.subMeshes.length; i++) {
       final material = mesh.subMeshes[i].mtr;
       material.diffuse.setFrom(color);
-      material.diffuseTexture = M3Texture.createSolidColor(color);
+      material.diffuseTexture = M3Texture.createSolidColor(
+        Vector4(color.x, color.y, color.z, 1.0),
+      );
       material.alphaMode = M3AlphaMode.blend;
       material.specular.setZero();
       material.shininess = 1;

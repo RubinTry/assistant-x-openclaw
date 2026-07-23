@@ -129,7 +129,12 @@ class M3RenderEngine {
     gl.depthFunc(WebGL.LEQUAL);
 
     gl.enable(WebGL.BLEND);
-    gl.blendFunc(WebGL.SRC_ALPHA, WebGL.ONE_MINUS_SRC_ALPHA); // WebGL.ONE
+    gl.blendFuncSeparate(
+      WebGL.SRC_ALPHA,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+      WebGL.ONE,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+    );
 
     if (!options.debug.wireframe) {
       // get scene program
@@ -162,7 +167,12 @@ class M3RenderEngine {
     gl.disable(WebGL.DEPTH_TEST);
     gl.disable(WebGL.CULL_FACE);
     gl.enable(WebGL.BLEND);
-    gl.blendFunc(WebGL.SRC_ALPHA, WebGL.ONE_MINUS_SRC_ALPHA);
+    gl.blendFuncSeparate(
+      WebGL.SRC_ALPHA,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+      WebGL.ONE,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+    );
 
     final prog2D = M3Resources.programRectangle!;
     gl.useProgram(prog2D.program);

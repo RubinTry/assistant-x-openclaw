@@ -97,7 +97,12 @@ class M3ReflectionProbe {
       gl.depthFunc(WebGL.LEQUAL);
 
       gl.enable(WebGL.BLEND);
-      gl.blendFunc(WebGL.SRC_ALPHA, WebGL.ONE_MINUS_SRC_ALPHA); // WebGL.ONE
+      gl.blendFuncSeparate(
+        WebGL.SRC_ALPHA,
+        WebGL.ONE_MINUS_SRC_ALPHA,
+        WebGL.ONE,
+        WebGL.ONE_MINUS_SRC_ALPHA,
+      );
 
       // render scene for cubemap face
       _context.prepareRenderQueue(scene, _camCapture);

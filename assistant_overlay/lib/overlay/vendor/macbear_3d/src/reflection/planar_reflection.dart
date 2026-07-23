@@ -129,7 +129,12 @@ class M3PlanarReflection {
     gl.depthFunc(WebGL.LEQUAL);
 
     gl.enable(WebGL.BLEND);
-    gl.blendFunc(WebGL.SRC_ALPHA, WebGL.ONE_MINUS_SRC_ALPHA); // WebGL.ONE
+    gl.blendFuncSeparate(
+      WebGL.SRC_ALPHA,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+      WebGL.ONE,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+    );
 
     gl.enable(WebGL.POLYGON_OFFSET_FILL);
     gl.polygonOffset(1.1, 4.0);

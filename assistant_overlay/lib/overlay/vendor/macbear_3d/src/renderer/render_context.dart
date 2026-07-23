@@ -144,7 +144,12 @@ class M3RenderContext {
 
     gl.depthFunc(WebGL.EQUAL); // Match exactly from 1st pass
     gl.depthMask(false); // Don't write to depth buffer in blending pass
-    gl.blendFunc(WebGL.SRC_ALPHA, WebGL.ONE_MINUS_SRC_ALPHA); // alpha blending
+    gl.blendFuncSeparate(
+      WebGL.SRC_ALPHA,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+      WebGL.ONE,
+      WebGL.ONE_MINUS_SRC_ALPHA,
+    );
 
     final stats = M3AppEngine.instance.renderEngine.stats;
     // (1/2) render reflection probe objects
